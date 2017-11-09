@@ -1,6 +1,5 @@
 ﻿using Abp.Application.Services;
 using Abp.Dependency;
-using Abp.WebApi.Client;
 using Castle.Core.Logging;
 
 using PluginsSystemHangfire.Common.DTO.Account;
