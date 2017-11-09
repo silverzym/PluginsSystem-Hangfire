@@ -111,7 +111,7 @@
     <Compile Include="DTO\Log\ServiceTraceLog.cs" />
     <Compile Include="DTO\Test.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="_System\MircroServiceContext.cs" />
+    <Compile Include="_System\PluginsSystemHangfireContext.cs" />
     <Compile Include="_System\RedisKey.cs" />
   </ItemGroup>
   <ItemGroup>
