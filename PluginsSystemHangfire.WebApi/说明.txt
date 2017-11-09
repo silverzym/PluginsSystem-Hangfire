@@ -1,0 +1,17 @@
+﻿PluginsSystemHangfire.WebApi
+	根据功能区分API
+ 
+目录结构：
+	-	Api					WebApi 基础配置
+		-	Config			基础配置文件
+		-	Providers		
+		-	Scripts			脚本{ 嵌入式资源 }
+
+	-	功能一
+		-	Controllers
+	-	功能二
+		-	Controllers
+
+
+		
+注意： 所有的请求 都要加上参数 token

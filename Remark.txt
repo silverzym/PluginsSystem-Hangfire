@@ -1,0 +1,129 @@
+MicroService 服务框架
+版本 ：  V.1.X.X
+描述 ：  跨库进行数据读写 目前针对 实体
+
+> 1. 使用 Redis 进行 登录用户信息的共享
+> 2. 不使用 Redis 进行 登录用户信息的共享
+
+---------------------------------------------
+版本 ：  V.0.0.0
+描述 ：  使用 Redis 进行 登录用户信息的共享
+		 不使用 Redis 进行 登录用户信息的共享
+
+---------------------------------------------
+版本 ：  V.0.1.0
+描述 ：  跨库数据读写  
+	1. 实体
+		1.1 不同的数据库，衍生出的 EntityFramework 中的 DbContext 会有多个
+				如 有 两个数据库 default And first ，
+				则 DefaultDbContext And FirstDBContext，
+				且 两个DBContext 需要手写 不能自动生成。
+		1.2 EntityFramework DbContext 关联的实体，不能重复。
+	2. 原生态SQL
+		2.1 扩展 EF 执行 SQL 语句，只是查询，无须改动任何东西，只要把 IExecuteSql 当成 AppService 正常使用就行
+		2.2 多库或者跨库 ，都要手动去添加 IExecute{@DataBaseName}Sql 区别不同数据库，执行的原生态 sql ,方便 优化性能
+			2.2.1 执行查询，无须改动任何东西，只需将 操作的 数据库扩展 IExecuteSql 注入到当前服务操作里就行，无须改动其他东西。
+			        private readonly IExecuteSql _DefaultDB;
+					private readonly IExecuteFirstSql _FirstDB;
+					private readonly IExecuteSecondSql _SecondDB;
+					public *****AppService(
+						IExecuteSql defaultDB,
+						IExecuteFirstSql firstDB,
+						IExecuteSecondSql secondDB
+						)
+					{
+						this._DefaultDB = defaultDB;
+						this._FirstDB = firstDB;
+						this._SecondDB = secondDB;
+					}
+
+			2.2.2 执行增、删、改，则需要关闭当前工作单元[UnitOfWork(false)]，因为扩展的Sql并不支持现有的事务，只能禁用当前的事务，重新使用数据库事务，事务不能重叠。
+					然后操作各库 扩展出来的 IExecuteSql 进行 SQL 操作。需要自定义捕获异常，这样保证 跨库操作成功，则全部提交，不成功则全部回滚
+					多库查询			
+						var list = _DefaultDB.Execute<T>(" sql ",parameter1,……,parametern);
+					多库 增、删、改
+						try
+						{
+							_DefaultDB.Execute("insert into test_master(name,value) values('AddDefaultDb','插入默认的数据库 并抛出异常')");
+							_FirstDB.Execute("insert into test_master(name,value) values('AddDefaultDb','插入默认的数据库 并抛出异常')");
+							_DB.Execute("insert into test_master(name,value) values('AddDefaultDb','插入默认的数据库 并抛出异常')");
+							_D_DB.Execute("insert into test_master(name,value) values('AddDefaultDb','插入默认的数据库 并抛出异常')");
+							
+							//throw new UserFriendlyException("插入默认的数据库 并抛出异 事务是否正常");
+							
+							_DefaultDB.Commit(true);
+							_FirstDB.Commit(true);
+							_DB.Commit(true);
+							_D_DB.Commit(true);
+						}
+						catch (Exception)
+						{
+							_DefaultDB.Commit(false);
+							_FirstDB.Commit(false);
+							_DB.Commit(false);
+							_D_DB.Commit(false);
+							throw;
+						}
+	目前没有更好的办法解决 跨库 执行原生态 SQL ;
+
+---------------------------------------------
+版本 ：  V.0.2.0
+描述 ：  后台工作，BackgroundJob
+         服务监控，TraceLog，EventLog
+
+		 后台工作：Hangfire/Abp.HangFire.dll
+							Hangfire.Core.dll
+							Hangfire.Core.resources.dll
+		 WebModule：
+					[add] typeof(AbpHangfireModule)
+		1. 直接随程序启动而启动后台线程
+			CoreModule：
+						public override void PostInitialize(){					
+							// 直接实例化 后台工作者 
+							// 后台工作者不同于后台工作。它们是运行在应用后台的简单独立线程
+							var workManager = IocManager.Resolve<IBackgroundWorkerManager>();
+							workManager.Add(IocManager.Resolve<TraceLogWorker>());
+						}
+		2. 通过Application 来启动 后台线程
+			Core:
+				public class TraceLogWorker : PeriodicBackgroundWorkerBase, ISingletonDependency
+				{
+					public TraceLogWorker(AbpTimer timer)
+						: base(timer)
+					{
+						Timer.Period = 2000; // 2 s
+					}
+
+					[UnitOfWork]
+					protected override void DoWork()
+					{
+						System.Threading.Thread.Sleep(5000);
+						Logger.Info(
+							System.Threading.Thread.CurrentThread.ManagedThreadId
+							+ " [ 后台线程 跟踪日志 PeriodicBackgroundWorkerBase DoWork ]");
+						//throw new Exception("TraceLogWorker DoWork");
+						//base.Stop();
+					}
+				}
+			Application:
+				public class TraceLogWorkerAppService : PluginsSystemHangfireAppServiceBase, ITraceLogWorkerAppService {
+        
+					private readonly TraceLogWorker traceLogWorker;
+					public TraceLogWorkerAppService(
+						TraceLogWorker traceLogWorker)
+					{
+						this.traceLogWorker = traceLogWorker;
+					}
+
+					public void Start()
+					{
+						this.Logger.Info("【TraceLogWorkerAppService】 【Start】 ");
+						this.traceLogWorker.Start();
+					}
+
+					public void Stop()
+					{
+						this.Logger.Info("【TraceLogWorkerAppService】 【Stop】 ");
+						this.traceLogWorker.Stop();
+					}
+				}

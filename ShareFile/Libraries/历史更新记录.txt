@@ -1,0 +1,12 @@
+##############################################################
+##	更新ABP底层框架时，一定要同时更新以下类库
+##
+##	Microsoft.Threading.Tasks.dll
+##	Microsoft.Threading.Tasks.Extensions.dll
+##	Microsoft.Threading.Tasks.Extensions.Desktop.dll
+##	Nito.AsyncEx.Concurrent.dll
+##	Nito.AsyncEx.dll
+##	Nito.AsyncEx.Enlightenment.dll
+##
+##	否则会出现版本冲突无法解决
+##############################################################

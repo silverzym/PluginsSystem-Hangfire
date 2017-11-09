@@ -1,0 +1,13 @@
+﻿添加 REDIS Cache
+1. Abp.RedisCache.dll
+2. StackExchange.Redis.dll
+
+
+更新 PluginsSystemHangfireWebModule 
+	1. 加上 AbpRedisCacheModule 的依赖
+	2. 在 PreInitialize 方法中启用 Redis { Configuration.Caching.UseRedis(); }
+
+同时 在 Core 中引用 以上 *.dll
+
+
+注意： 所有的请求 都要加上参数 token

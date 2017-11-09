@@ -1,0 +1,23 @@
+﻿@model System.Web.Mvc.HandleErrorInfo
+
+@{
+    ViewBag.Title = "Error";
+}
+
+<div class="portlet-body">
+    <h2>异常信息：</h2>
+    @if (Model != null)
+    {
+        <h3>@Model.Exception.GetType().Name thrown in @Model.ControllerName @Model.ActionName</h3>
+        <p>@Model.Exception.Message </p>
+        <p>@Model.Exception.InnerException</p>
+        <p>@Model.Exception.Source </p>
+        <p>@Model.Exception.TargetSite </p>
+        <p>@Model.Exception.StackTrace </p>
+    }
+    else
+    {
+        <h3> Error.</h3>
+        <p> An error occurred while processing your request.</p>
+    }
+</div>

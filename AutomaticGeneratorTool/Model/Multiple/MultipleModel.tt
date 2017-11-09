@@ -1,0 +1,4110 @@
+﻿<#@ template debug="true" hostspecific="true" language="C#" #>
+<#@ assembly name="System.Core" #>
+<#@ assembly name="System.Data" #>
+<#@ assembly name="System.Xml" #>
+<#@ assembly name="System.Xml.Linq" #>
+<#@ assembly name="EnvDTE" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ import namespace="System.Collections.ObjectModel" #>
+<#@ import namespace="System.Data" #>
+<#@ import namespace="System.Data.SqlClient" #>
+<#@ import namespace="System.Globalization" #>
+<#@ import namespace="System.Reflection" #>
+<#@ import namespace="System.IO" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Text"#>
+<#@ import namespace="System.Text.RegularExpressions" #>
+<#@ import namespace="System.Xml" #>
+<#@ import namespace="System.Xml.Serialization" #>
+<#@ import namespace="System.Xml.Linq" #>
+<#@ import namespace="EnvDTE" #>
+<#@ output extension=".cs" #>
+<#
+    const bool fieldDefaultValue = true;
+    const string connectionString = "Data Source=116.62.6.107;Initial Catalog=HisSql;User ID=sa;password=zaq12wsx#"; 
+    Encoding encoding = Encoding.GetEncoding("utf-8");
+
+    string filePath = this.Host.TemplateFile;
+    string name = System.IO.Path.GetFileNameWithoutExtension(filePath);
+    string namespaceName =  "Meision";
+    IServiceProvider provider = (IServiceProvider)this.Host;
+    EnvDTE.DTE dte = (EnvDTE.DTE)provider.GetService(typeof(EnvDTE.DTE));
+    namespaceName = dte.Solution.FindProjectItem(filePath).Properties.Item("CustomToolNamespace").Value.ToString();
+
+    FileManager	fileManager = FileManager.Create(this);
+#>
+<#
+    SQLServerGenerator generator = new SQLServerGenerator(connectionString);
+    DatabaseModel databaseModel = generator.CreateDatabaseModel();
+#>
+using System;
+using System.ComponentModel.DataAnnotations.Schema;
+using System.Data.Common;
+using System.Data.Entity;
+using System.Data.Entity.Infrastructure.Annotations;
+using System.Linq;
+using Abp.EntityFramework;
+
+namespace <#=        namespaceName#>
+{
+    public partial class <#=        name#> : AbpDbContext
+    {
+        public <#=        name#>()
+            : base("Default")
+        {
+        }
+
+        public <#=        name#>(string nameOrConnectionString)
+            : base(nameOrConnectionString)
+        {
+        }
+        
+<#
+    foreach(TableModel tableModel in databaseModel.Tables)
+    {
+#>
+        public virtual IDbSet<<#=            tableModel.Name#>> <#=            tableModel.Name#> { get; set; }
+<#
+    }
+#>
+
+        protected override void OnModelCreating(DbModelBuilder modelBuilder)
+        {
+<#
+    foreach (TableModel tableModel in databaseModel.Tables)
+    {
+#>
+            // <#=            tableModel.Name#> Definations
+            modelBuilder.Entity<<#=            tableModel.Name#>>().ToTable("<#=            tableModel.Name#>");
+<#
+        RelationshipModel[] principalModels = databaseModel.Relationships.Where(p=>tableModel.Schema.Equals(p.PrincipalEnd.Schema, StringComparison.OrdinalIgnoreCase) && tableModel.Name.Equals(p.PrincipalEnd.Table, StringComparison.OrdinalIgnoreCase)).ToArray();
+        RelationshipModel[] dependentModels = databaseModel.Relationships.Where(p=>tableModel.Schema.Equals(p.DependentEnd.Schema, StringComparison.OrdinalIgnoreCase) && tableModel.Name.Equals(p.DependentEnd.Table, StringComparison.OrdinalIgnoreCase)).ToArray();
+        PrimaryKeyConstraintModel primaryKeyModel = tableModel.Constraints.OfType<PrimaryKeyConstraintModel>().FirstOrDefault();
+        if (primaryKeyModel != null)
+        {
+            if (primaryKeyModel.Columns.Length != 1)
+            {
+                throw new Exception("Only support PK for single column.");
+            }
+#>
+            modelBuilder.Entity<<#=                tableModel.Name#>>().HasKey(_ => _.Id);
+<#
+            
+        }
+        foreach (ColumnModel columnModel in tableModel.Columns)
+        {
+            // Skip column: ----特殊处理，公共使用时需要去掉
+            if (columnModel.Name.Equals("id", StringComparison.OrdinalIgnoreCase)
+                || columnModel.Name.Equals("gmt_create", StringComparison.OrdinalIgnoreCase)
+                || columnModel.Name.Equals("gmt_modify", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            // Skip column: ----特殊处理，公共使用时需要去掉
+
+            string columnName = columnModel.Name;
+            if (columnName == primaryKeyModel.Columns[0])
+            {
+                columnName = "Id";
+#>
+            modelBuilder.Entity<<#=                    tableModel.Name#>>().Property(_ => _.<#=                    columnName#>).HasColumnName("<#=                    columnModel.Name#>");
+<#
+            }
+
+            if ((tableModel.Identity != null)
+                && columnModel.Name.Equals(tableModel.Identity.ColumnName, StringComparison.OrdinalIgnoreCase))
+            {
+#>
+            modelBuilder.Entity<<#=                    tableModel.Name#>>().Property(_ => _.<#=                    columnName#>).HasDatabaseGeneratedOption(DatabaseGeneratedOption.Identity);
+<#
+            }
+            if (!columnModel.Nullable)
+            {#>
+            modelBuilder.Entity<<#=                    tableModel.Name#>>().Property(_ => _.<#=                    columnName#>).IsRequired();
+<#
+            }
+
+            switch (columnModel.Type)
+            {
+                case DbType.AnsiString:
+                    if (columnModel.Precision >=0) 
+                    {#>
+            modelBuilder.Entity<<#=                            tableModel.Name#>>().Property(_ => _.<#=                            columnName#>).HasMaxLength(<#=                            columnModel.Precision#>);
+<#                    }
+                    else
+                    {#>
+            modelBuilder.Entity<<#=                            tableModel.Name#>>().Property(_ => _.<#=                            columnName#>).IsMaxLength();
+<#                    }#>
+            modelBuilder.Entity<<#=                        tableModel.Name#>>().Property(_ => _.<#=                        columnName#>).IsUnicode(false);
+<#
+                    break;
+                case DbType.AnsiStringFixedLength:
+                    if (columnModel.Precision >=0) 
+                    {#>
+            modelBuilder.Entity<<#=                            tableModel.Name#>>().Property(_ => _.<#=                            columnName#>).HasMaxLength(<#=                            columnModel.Precision#>);
+<#                    }
+                    else
+                    {#>
+            modelBuilder.Entity<<#=                            tableModel.Name#>>().Property(_ => _.<#=                            columnName#>).IsMaxLength();
+<#                    }#>
+            modelBuilder.Entity<<#=                        tableModel.Name#>>().Property(_ => _.<#=                        columnName#>).IsFixedLength();
+            modelBuilder.Entity<<#=                        tableModel.Name#>>().Property(_ => _.<#=                        columnName#>).IsUnicode(false);
+<#
+                    break;
+                case DbType.Binary:
+                    if (columnModel.Length >=0) 
+                    {#>
+            modelBuilder.Entity<<#=                            tableModel.Name#>>().Property(_ => _.<#=                            columnName#>).HasMaxLength(<#=                            columnModel.Length#>);
+<#                    }
+                    else
+                    {#>
+            modelBuilder.Entity<<#=                            tableModel.Name#>>().Property(_ => _.<#=                            columnName#>).IsMaxLength();
+<#                    }#>
+            modelBuilder.Entity<<#=                        tableModel.Name#>>().Property(_ => _.<#=                        columnName#>).IsFixedLength();
+<#
+                    break;
+                case DbType.Boolean:
+#>
+<#
+                    break;
+                case DbType.Byte:
+#>
+<#
+                    break;
+                case DbType.Currency:
+#>
+            modelBuilder.Entity<<#=                        tableModel.Name#>>().Property(_ => _.<#=                        columnName#>).HasColumnType("moeny");
+            modelBuilder.Entity<<#=                        tableModel.Name#>>().Property(_ => _.<#=                        columnName#>).HasPrecision(<#=                        columnModel.Precision#>, <#=                        columnModel.Scale#>);
+<#
+                    break;
+                case DbType.Date:
+#>
+            modelBuilder.Entity<<#=                        tableModel.Name#>>().Property(_ => _.<#=                        columnName#>).HasColumnType("date");
+<#
+                    break;
+                case DbType.DateTime:
+#>
+<#
+                    break;
+                case DbType.DateTime2:
+#>
+            modelBuilder.Entity<<#=                        tableModel.Name#>>().Property(_ => _.<#=                        columnName#>).HasColumnType("datetime2");
+            modelBuilder.Entity<<#=                        tableModel.Name#>>().Property(_ => _.<#=                        columnName#>).HasPrecision(<#=                        columnModel.Scale#>);
+<#
+                    break;
+                case DbType.DateTimeOffset:
+#>
+            modelBuilder.Entity<<#=                        tableModel.Name#>>().Property(_ => _.<#=                        columnName#>).HasPrecision(<#=                        columnModel.Scale#>);
+<#
+                    break;
+                case DbType.Decimal:
+#>
+            modelBuilder.Entity<<#=                        tableModel.Name#>>().Property(_ => _.<#=                        columnName#>).HasPrecision(<#=                        columnModel.Precision#>, <#=                        columnModel.Scale#>);
+<#
+                    break;
+                case DbType.Double:
+#>
+<#
+                    break;
+                case DbType.Guid:
+#>
+<#
+                    break;
+                case DbType.Object:
+#>
+<#
+                    break;
+                case DbType.SByte:
+#>
+<#
+                    break;
+                case DbType.Single:
+#>
+<#
+                    break;
+                case DbType.String:
+                    if (columnModel.Precision >= 0) 
+                    {#>
+            modelBuilder.Entity<<#=                            tableModel.Name#>>().Property(_ => _.<#=                            columnName#>).HasMaxLength(<#=                            columnModel.Precision#>);
+<#                    }
+                    else
+                    {#>
+            modelBuilder.Entity<<#=                            tableModel.Name#>>().Property(_ => _.<#=                            columnName#>).IsMaxLength();
+<#                    }#>
+            modelBuilder.Entity<<#=                        tableModel.Name#>>().Property(_ => _.<#=                        columnName#>).IsUnicode(true);
+<#
+                    break;
+                case DbType.StringFixedLength:
+                    if (columnModel.Length >=0) 
+                    {#>
+            modelBuilder.Entity<<#=                            tableModel.Name#>>().Property(_ => _.<#=                            columnName#>).HasMaxLength(<#=                            columnModel.Precision#>);
+<#                    }
+                    else
+                    {#>
+            modelBuilder.Entity<<#=                            tableModel.Name#>>().Property(_ => _.<#=                            columnName#>).IsMaxLength();
+<#                    }#>
+            modelBuilder.Entity<<#=                        tableModel.Name#>>().Property(_ => _.<#=                        columnName#>).IsUnicode(true);
+            modelBuilder.Entity<<#=                        tableModel.Name#>>().Property(_ => _.<#=                        columnName#>).IsFixedLength();
+<#
+                    break;
+                case DbType.Time:
+#>
+            modelBuilder.Entity<<#=                        tableModel.Name#>>().Property(_ => _.<#=                        columnName#>).HasPrecision(<#=                        columnModel.Scale#>);
+<#
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        // Index
+        foreach (IndexModel indexModel in tableModel.Indexes)
+        {
+            for(int i = 0; i < indexModel.ColumnSorts.Count; i++)
+            {
+                ColumnSortModel sortModel = indexModel.ColumnSorts[i];
+#>
+            modelBuilder.Entity<<#=                    tableModel.Name#>>().Property(_ => _.<#=                    sortModel.Column#>).HasColumnAnnotation(IndexAnnotation.AnnotationName, new IndexAnnotation(new IndexAttribute("<#=                    indexModel.Name#>", <#=                    i#>) { IsClustered = <#=                    indexModel.IsClustered.ToString().ToLowerInvariant()#>, IsUnique = <#=                    indexModel.IsUnique.ToString().ToLowerInvariant()#> }));
+<#
+            }
+        }
+#>
+<#
+    } // For Table
+#>
+
+<#
+    foreach (RelationshipModel relationshipModel in databaseModel.Relationships)
+    {
+        string[] columns = relationshipModel.DependentEnd.Columns.Select(p => "_." + p).ToArray();
+#>
+            modelBuilder.Entity<<#=            relationshipModel.PrincipalEnd.Table#>>().HasMany(_ => _.<#=            relationshipModel.DependentEnd.Table#>).WithRequired(_ => _.<#=            relationshipModel.PrincipalEnd.Table#>).HasForeignKey(_ => new { <#=            string.Join(", ", columns)#> }).WillCascadeOnDelete(<#=            relationshipModel.DeleteCascade.ToString().ToLowerInvariant()#>);
+<#
+    } // For Relationship
+#>
+        
+            base.OnModelCreating(modelBuilder);
+        }
+    }
+}
+
+<#
+    // Generate entity classes
+    foreach (TableModel tableModel in databaseModel.Tables)
+    {
+        RelationshipModel[] principalModels = databaseModel.Relationships.Where(p=>tableModel.Schema.Equals(p.PrincipalEnd.Schema, StringComparison.OrdinalIgnoreCase) && tableModel.Name.Equals(p.PrincipalEnd.Table, StringComparison.OrdinalIgnoreCase)).ToArray();
+        RelationshipModel[] dependentModels = databaseModel.Relationships.Where(p=>tableModel.Schema.Equals(p.DependentEnd.Schema, StringComparison.OrdinalIgnoreCase) && tableModel.Name.Equals(p.DependentEnd.Table, StringComparison.OrdinalIgnoreCase)).ToArray();
+        PrimaryKeyConstraintModel primaryKeyModel = tableModel.Constraints.OfType<PrimaryKeyConstraintModel>().FirstOrDefault();
+        if (primaryKeyModel != null)
+        {
+            if (primaryKeyModel.Columns.Length != 1)
+            {
+                throw new Exception("Only support PK for single column.");
+            }
+        }
+        // Base class
+        string baseClass = null;       
+        ColumnModel idColumnModel = tableModel.Columns.FirstOrDefault(p => primaryKeyModel.Columns[0] == p.Name);
+        if (idColumnModel != null)
+        {
+            string idType = DatabaseHelper.GetCLRTypeString(idColumnModel.Type, idColumnModel.Nullable);
+            baseClass = (idType == "int") ? "Entity" : "Entity<" + idType + ">";
+        }
+        // Interface
+        List<string> interfaceNames = new List<string>();
+        if (tableModel.Columns.Any(p => (p.Name == "TenantId") && (p.Type == DbType.Int32) && !p.Nullable))
+        {
+            string interfaceName = "IMustHaveTenant";
+            interfaceNames.Add(interfaceName);
+        }
+        if (tableModel.Columns.Any(p => (p.Name == "TenantId") && (p.Type == DbType.Int32) && p.Nullable))
+        {
+            string interfaceName = "IMayHaveTenant";
+            interfaceNames.Add(interfaceName);
+        }
+        if (tableModel.Columns.Any(p => (p.Name == "CreationTime") && (p.Type == DbType.DateTime) && !p.Nullable))
+        {
+            string interfaceName = "IHasCreationTime";
+            if (tableModel.Columns.Any(p => (p.Name == "CreatorUserId") && (p.Type == DbType.Int64) && p.Nullable))
+            {
+                interfaceName = "ICreationAudited";
+            }
+            interfaceNames.Add(interfaceName);
+        }
+        if (tableModel.Columns.Any(p => (p.Name == "LastModificationTime") && (p.Type == DbType.DateTime) && p.Nullable))
+        {
+            string interfaceName = "IHasModificationTime";
+            if (tableModel.Columns.Any(p => (p.Name == "LastModifierUserId") && (p.Type == DbType.Int64) && p.Nullable))
+            {
+                interfaceName = "IModificationAudited";
+            }
+            interfaceNames.Add(interfaceName);
+        }
+        if (tableModel.Columns.Any(p => (p.Name == "IsDeleted") && (p.Type == DbType.Boolean) && !p.Nullable))
+        {
+            string interfaceName = "ISoftDelete";
+            if (tableModel.Columns.Any(p => (p.Name == "DeletionTime") && (p.Type == DbType.DateTime) && p.Nullable))
+            {
+                interfaceName = "IHasDeletionTime";
+                if (tableModel.Columns.Any(p => (p.Name == "DeleterUserId") && (p.Type == DbType.Int64) && p.Nullable))
+                {
+                    interfaceName = "IDeletionAudited";
+                }
+            }
+            interfaceNames.Add(interfaceName);
+        }
+        if (tableModel.Columns.Any(p => (p.Name == "IsActive") && (p.Type == DbType.Boolean) && !p.Nullable))
+        {
+            string interfaceName = "IPassivable";
+            interfaceNames.Add(interfaceName);
+        }
+
+        fileManager.StartNewFile(string.Format("{0}.cs", tableModel.Name));
+#>
+/*** This file is auto generated by T4 template, please do not modify manually. ***/
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using System.Data.Entity.Spatial;
+using Abp.Domain.Entities;
+using Abp.Domain.Entities.Auditing;
+
+namespace <#=namespaceName#>
+{
+    /// <summary>
+    /// <#=tableModel.Description ?? string.Empty#>
+    /// </summary>
+    public partial class <#=tableModel.Name#><#=!string.IsNullOrEmpty(baseClass) ? " : " + baseClass : string.Empty#><#=(interfaceNames.Count > 0) ? ", " + string.Join(", ", interfaceNames.ToArray()) : string.Empty#>
+    {
+        public <#=tableModel.Name#>()
+        {
+            // Set default value
+<#
+        if (fieldDefaultValue)
+        {
+            foreach (ColumnModel columnModel in tableModel.Columns)
+            {
+                switch (DatabaseHelper.GetCLRTypeString(columnModel.Type, columnModel.Nullable))
+                {
+                    case "string":
+#>
+            this.<#=                            columnModel.Name#> = string.Empty;
+<#
+                        break;
+                    case "DateTime":
+                        if ((columnModel.Name != "CreationTime") && (columnModel.Name != "LastModificationTime"))
+                        {
+#>
+            this.<#=columnModel.Name#> = new DateTime(1900, 1, 1);
+<#
+                        }
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+#>
+
+<#
+        foreach (RelationshipModel relationshipModel in principalModels)
+        {
+#>
+            this.<#=                relationshipModel.DependentEnd.Table#> = new HashSet<<#=                relationshipModel.DependentEnd.Table#>>();
+<#
+        }
+#>
+        }
+
+<#
+        foreach (ColumnModel columnModel in tableModel.Columns)
+        {
+            // Skip column: ----特殊处理，公共使用时需要去掉
+            if (columnModel.Name.Equals("id", StringComparison.OrdinalIgnoreCase)
+                || columnModel.Name.Equals("gmt_create", StringComparison.OrdinalIgnoreCase)
+                || columnModel.Name.Equals("gmt_modify", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            // Skip column: ----特殊处理，公共使用时需要去掉
+#>
+        /// <summary>
+        /// <#=                columnModel.Description ?? string.Empty#>
+        /// </summary>
+        <#=                (columnModel == idColumnModel) ? "//" : string.Empty#>public <#=                DatabaseHelper.GetCLRTypeString(columnModel.Type, columnModel.Nullable)#> <#=                (columnModel == idColumnModel) ? "Id" : columnModel.Name#> { get; set; }
+<#
+        }
+#>
+
+<#
+        foreach (RelationshipModel relationshipModel in dependentModels)
+        {
+#>
+        public virtual <#=                relationshipModel.PrincipalEnd.Table#> <#=                relationshipModel.PrincipalEnd.Table#> { get; set; }
+<#
+        }
+#>
+<#
+        foreach (RelationshipModel relationshipModel in principalModels)
+        {
+#>
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Usage", "CA2227:CollectionPropertiesShouldBeReadOnly")]
+        public virtual ICollection<<#=                relationshipModel.DependentEnd.Table#>> <#=                relationshipModel.DependentEnd.Table#> { get; set; }
+<#
+        }
+#>
+    }
+}
+
+<#
+    }
+
+    fileManager.Process(true);
+#>
+
+
+<#+
+
+    public static class Strings
+    {
+        public const string TableModel_Exception_SchemaEmpty = "Table schema must not be empty.";
+        public const string TableModel_Exception_NameEmpty = "Table name must not be empty.";
+        public const string ColumnModel_Exception_NameEmpty = "Column name must not be empty.";
+        public const string IndexModel_Exception_NameEmpty = "Index name must not be empty.";
+        public const string TableModelCollection_Exception_NameExists = "Table name already exists.";
+        public const string ColumnModelCollection_Exception_NameExists = "Column name already exists.";
+    }
+
+    public interface IExpressible
+    {
+        void ParseExpression(string expression);
+        string ToExpression();
+    }
+
+    public enum SortOrder
+    {
+        None = 0,
+        Ascending = 1,
+        Descending = -1,
+    }
+
+    public enum SqlColumnType
+    {
+        @image = 34,
+        @text = 35,
+        @uniqueidentifier = 36,
+        @date = 40,
+        @time = 41,
+        @datetime2 = 42,
+        @datetimeoffset = 43,
+        @tinyint = 48,
+        @smallint = 52,
+        @int = 56,
+        @smalldatetime = 58,
+        @real = 59,
+        @money = 60,
+        @datetime = 61,
+        @float = 62,
+        @sql_variant = 98,
+        @ntext = 99,
+        @bit = 104,
+        @decimal = 106,
+        @numeric = 108,
+        @smallmoney = 122,
+        @bigint = 127,
+        @hierarchyid = 128,
+        @geometry = 129,
+        @geography = 130,
+        @varbinary = 165,
+        @varchar = 167,
+        @binary = 173,
+        @char = 175,
+        @timestamp = 189,
+        @nvarchar = 231,
+        @nchar = 239,
+        @xml = 241,
+        @sysname = 256,
+    }
+
+    public static class DatabaseHelper
+    {
+        #region Static
+        public const string Separator = ",";
+        public const string Accessor = ".";
+        public const string Blank = " ";
+        public const string Relation = "_";
+        public const string Connect = "-";
+
+        private static readonly Dictionary<SqlColumnType, DbType> __SqlColumnTypeDbType = new Dictionary<SqlColumnType, DbType>()
+            {
+            {SqlColumnType.@image, DbType.Binary},
+{SqlColumnType.@text, DbType.AnsiString},
+            {SqlColumnType.@uniqueidentifier, DbType.Guid},
+{SqlColumnType.@date, DbType.Date},
+{SqlColumnType.@time, DbType.Time},
+{SqlColumnType.@datetime2, DbType.DateTime2},
+{SqlColumnType.@datetimeoffset, DbType.DateTimeOffset},
+{SqlColumnType.@tinyint, DbType.Byte},
+{SqlColumnType.@smallint, DbType.Int16},
+{SqlColumnType.@int, DbType.Int32},
+{SqlColumnType.@smalldatetime, DbType.DateTime},
+{SqlColumnType.@real, DbType.Single},
+{SqlColumnType.@money, DbType.Currency},
+{SqlColumnType.@datetime, DbType.DateTime},
+{SqlColumnType.@float, DbType.Double},
+{SqlColumnType.@ntext, DbType.String},
+{SqlColumnType.@bit, DbType.Boolean},
+{SqlColumnType.@decimal, DbType.Decimal},
+{SqlColumnType.@numeric, DbType.Decimal},
+{SqlColumnType.@smallmoney, DbType.Currency},
+{SqlColumnType.@bigint, DbType.Int64},
+{SqlColumnType.@varbinary, DbType.Binary},
+{SqlColumnType.@varchar, DbType.AnsiString},
+{SqlColumnType.@binary, DbType.Binary},
+{SqlColumnType.@char, DbType.AnsiStringFixedLength},
+{SqlColumnType.@timestamp, DbType.Binary},
+{SqlColumnType.@nvarchar, DbType.String},
+{SqlColumnType.@nchar, DbType.StringFixedLength},
+{SqlColumnType.@xml, DbType.Xml},
+};
+
+private static readonly Dictionary<DbType, Tuple<string, string>> __DbTypeString = new Dictionary<DbType, Tuple<string, string>>()
+    {
+        {DbType.AnsiString, new Tuple<string, string>("string", "string")},
+        {DbType.AnsiStringFixedLength, new Tuple<string, string>("string", "string")},
+        {DbType.Binary, new Tuple<string, string>("byte[]", "byte[]")},
+        {DbType.Boolean, new Tuple<string, string>("bool", "bool?")},
+        {DbType.Byte, new Tuple<string, string>("byte", "byte?")},
+        {DbType.Currency, new Tuple<string, string>("decimal", "decimal?")},
+        {DbType.Date, new Tuple<string, string>("DateTime", "DateTime?")},
+        {DbType.DateTime, new Tuple<string, string>("DateTime", "DateTime?")},
+        {DbType.DateTime2, new Tuple<string, string>("DateTime", "DateTime?")},
+        {DbType.DateTimeOffset, new Tuple<string, string>("DateTimeOffset", "DateTimeOffset?")},
+        {DbType.Decimal, new Tuple<string, string>("decimal", "decimal?")},
+        {DbType.Double, new Tuple<string, string>("double", "double?")},
+        {DbType.Guid, new Tuple<string, string>("Guid", "Guid?")},
+        {DbType.Int16, new Tuple<string, string>("short", "short?")},
+        {DbType.Int32, new Tuple<string, string>("int", "int?")},
+        {DbType.Int64, new Tuple<string, string>("long", "long?")},
+        {DbType.Object, new Tuple<string, string>("object", "object")},
+        {DbType.SByte, new Tuple<string, string>("sbyte", "sbyte?")},
+        {DbType.Single, new Tuple<string, string>("float", "float?")},
+        {DbType.String, new Tuple<string, string>("string", "string")},
+        {DbType.StringFixedLength, new Tuple<string, string>("string", "string")},
+        {DbType.Time, new Tuple<string, string>("TimeSpan", "TimeSpan?")},
+        {DbType.UInt16, new Tuple<string, string>("ushort", "ushort?")},
+        {DbType.UInt32, new Tuple<string, string>("uint", "uint?")},
+        {DbType.UInt64, new Tuple<string, string>("ulong", "ulong?")},
+        {DbType.Xml, new Tuple<string, string>("string", "string")},
+        };
+#endregion Static
+
+public static DbType GetDbType(SqlColumnType type)
+{
+    if (!DatabaseHelper.__SqlColumnTypeDbType.ContainsKey(type))
+    {
+        throw new NotSupportedException();
+    }
+
+    return DatabaseHelper.__SqlColumnTypeDbType[type];
+}
+
+public static string GetCLRTypeString(DbType type, bool nullable)
+{
+    if (!DatabaseHelper.__DbTypeString.ContainsKey(type))
+    {
+        throw new NotSupportedException();
+    }
+
+    Tuple<string, string> pair = DatabaseHelper.__DbTypeString[type];
+    return !nullable ? pair.Item1 : pair.Item2;
+}
+
+public static string GenerateLoadTablesScript()
+{
+    string text = @"
+        SELECT
+        [Schema] = s.name,
+        [Name] = o.name,
+        [Description] = p.value
+        FROM
+        sys.schemas s
+        INNER JOIN sys.sysobjects o ON s.schema_id = o.uid
+        LEFT JOIN sys.extended_properties p ON o.id = p.major_id AND p.minor_id = 0
+        WHERE
+        o.xtype = 'U'
+        ORDER BY
+        [Schema] ASC,
+        [Name] ASC
+        ";
+    return text;
+}
+
+public static string GenerateLoadColumnsScript()
+{
+    string text = @"
+        SELECT
+        [Schema] = s.name,
+        [TableName] = o.name,
+        [ColumnName] = c.name,
+        [Sequence] = c.colorder,
+        [Type] = t.name,
+        [Length] = c.length,
+        [Precision] = c.prec,
+        [Scale] = c.scale,
+        [Nullable] = c.isnullable,
+        [Collation] = c.collation,
+        [DefaultValue] = m.text,
+        [Description] = p.value
+        FROM 
+        sys.schemas s
+        INNER JOIN sys.sysobjects o ON s.schema_id = o.uid
+        INNER JOIN sys.syscolumns c ON o.id = c.id     
+        LEFT JOIN sys.systypes t ON c.xtype = t.xusertype
+        LEFT JOIN sys.syscomments m ON c.cdefault = m.id
+        LEFT JOIN sys.extended_properties p ON c.id = p.major_id AND c.colid = p.minor_id
+        WHERE
+        o.xtype = 'U'
+        ORDER BY
+        [Schema] ASC,
+        [TableName] ASC, 
+        [Sequence] ASC
+        ";
+    return text;
+}
+
+public static string GenerateLoadIdentitiesScript()
+{
+    string text = @"
+        SELECT
+        [Schema] = s.name,
+        [TableName] = o.name,
+        [ColumnName] = i.name,
+        [Seed] = i.seed_value,
+        [Increment] = i.increment_value
+        FROM
+        sys.schemas s
+        INNER JOIN sys.sysobjects o ON s.schema_id = o.uid
+        INNER JOIN sys.identity_columns i ON o.id = i.object_id
+        WHERE
+        o.xtype = 'U'
+        ";
+    return text;
+}
+
+public static string GenerateLoadIndicesScript()
+{
+    string text = @"
+        SELECT
+        [Schema] = s.name,
+        [TableName] = o.name,
+        [IndexName] = i.name,
+        [ColumnName] = c.name,
+        [Sequence] = k.keyno,
+        [IsDescending] = INDEXKEY_PROPERTY(o.id, k.indid, k.keyno, 'IsDescending'),
+        [IsPrimaryKey] = CASE WHEN EXISTS(SELECT 1 FROM sys.sysobjects WHERE name = i.name AND xtype = 'PK') THEN 1 ELSE 0 END,
+        [IsUniqueConstraint] = CASE WHEN EXISTS(SELECT 1 FROM sys.sysobjects WHERE name = i.name AND xtype = 'UQ') THEN 1 ELSE 0 END,
+        [IsClustered] = INDEXPROPERTY(o.id, i.name, 'IsClustered'),
+        [IsUnique] = INDEXPROPERTY(o.id, i.name, 'IsUnique')
+        FROM
+        sys.schemas s
+        INNER JOIN sys.sysobjects o ON s.schema_id = o.uid
+        INNER JOIN sys.sysindexes i ON i.id = o.id
+        INNER JOIN sys.sysindexkeys k ON i.id = k.id AND i.indid = k.indid
+        INNER JOIN sys.syscolumns c ON k.id = c.id AND k.colid = c.colid
+        WHERE
+        o.xtype = 'U'
+        ORDER BY
+        [Schema] ASC,
+        [TableName] ASC,
+        [IndexName] ASC,
+        [Sequence] ASC
+        ";
+    return text;
+}
+
+public static string GenerateLoadForeignKeysScript()
+{
+    string text = @"
+        SELECT
+        [ForeignKeyName] = o.name,
+        [PrincipalTableSchema] = OBJECT_SCHEMA_NAME(f.rkeyid),
+        [PrincipalTableName] = OBJECT_NAME(f.rkeyid),
+        [PrincipalColumnName] = (SELECT name FROM sys.syscolumns WHERE colid=f.rkey AND id=f.rkeyid),
+        [DependentTableSchema] = OBJECT_SCHEMA_NAME(f.fkeyid),
+        [DependentTableName] = OBJECT_NAME(f.fkeyid),
+        [DependentColumnName] = (SELECT name FROM sys.syscolumns WHERE colid = f.fkey AND id = f.fkeyid),
+        [Sequence] = f.keyno,
+        [UpdateCascade] = OBJECTPROPERTY(o.id,'CnstIsUpdateCascade'),
+        [DeleteCascade] = OBJECTPROPERTY(o.id,'CnstIsDeleteCascade') 
+        FROM
+        sys.sysobjects o
+        INNER JOIN sys.sysforeignkeys f ON f.constid = o.id
+        WHERE
+        o.xtype = 'F'
+        ORDER BY   
+        [ForeignKeyName] ASC,
+        [Sequence] ASC
+        ";
+    return text;
+}
+}
+
+public class SQLServerGenerator
+{
+    private string _connectionString;
+    public string ConnectionString
+    {
+        get
+        {
+            return this._connectionString;
+        }
+    }
+
+    private DataTable _tTables;
+    private DataTable _tColumns;
+    private DataTable _tIdentities;
+    private DataTable _tIndices;
+    private DataTable _tForeignKeys;
+
+    public SQLServerGenerator(string connectionString)
+    {
+        this._connectionString = connectionString;
+    }
+
+    public DatabaseModel CreateDatabaseModel()
+    {
+        DataSet dataSet = new DataSet();
+        string[] scripts = new string[]
+            {
+            DatabaseHelper.GenerateLoadTablesScript(),
+            DatabaseHelper.GenerateLoadColumnsScript(),
+            DatabaseHelper.GenerateLoadIdentitiesScript(),
+            DatabaseHelper.GenerateLoadIndicesScript(),
+            DatabaseHelper.GenerateLoadForeignKeysScript()
+            };
+
+        using (SqlConnection connection = new SqlConnection(this._connectionString))
+        {
+            connection.Open();
+
+            SqlDataAdapter adapter = new SqlDataAdapter(string.Join(";", scripts), connection);
+            adapter.Fill(dataSet);
+            this._tTables = dataSet.Tables[0];
+            this._tColumns = dataSet.Tables[1];
+            this._tIdentities = dataSet.Tables[2];
+            this._tIndices = dataSet.Tables[3];
+            this._tForeignKeys = dataSet.Tables[4];
+
+            DatabaseModel databaseModel = new DatabaseModel(connection.Database);
+            // Tables
+            foreach (DataRow row in this._tTables.Rows)
+            {
+                TableModel tableModel = this.CreateTableModel(row);
+                databaseModel.Tables.Add(tableModel);
+            }
+            // Relationships
+            foreach (IGrouping<string, DataRow> row in this._tForeignKeys.Select().GroupBy(p => Convert.ToString(p["ForeignKeyName"])))
+            {
+                RelationshipModel relationshipModel = this.CreateRelationshipModel(row.ToArray());
+                databaseModel.Relationships.Add(relationshipModel);
+            }
+
+            return databaseModel;
+        }
+    }
+
+    private TableModel CreateTableModel(DataRow tableRow)
+    {
+        TableModel tableModel = new TableModel();
+        tableModel.Schema = Convert.ToString(tableRow["Schema"]);
+        tableModel.Name = Convert.ToString(tableRow["Name"]);
+        tableModel.Description = Convert.ToString(tableRow["Description"]);
+
+        // Columns
+        foreach (DataRow row in this._tColumns.Select(string.Format(System.Globalization.CultureInfo.InvariantCulture, "[Schema] = '{0}' AND [TableName] = '{1}'", tableModel.Schema, tableModel.Name)))
+        {
+            ColumnModel columnModel = this.CreateColumnModel(row);
+            tableModel.Columns.Add(columnModel);
+        }
+        // Identity
+        foreach (DataRow row in this._tIdentities.Select(string.Format(System.Globalization.CultureInfo.InvariantCulture, "[Schema] = '{0}' AND [TableName] = '{1}'", tableModel.Schema, tableModel.Name)))
+        {
+            IdentityModel identityModel = this.CreateIdentityModel(row);
+            tableModel.Identity = identityModel;
+        }
+        // PrimaryKeys
+        foreach (IGrouping<string, DataRow> row in this._tIndices.Select(string.Format(System.Globalization.CultureInfo.InvariantCulture, "[Schema] = '{0}' AND [TableName] = '{1}' AND [IsPrimaryKey] = 1", tableModel.Schema, tableModel.Name)).GroupBy(p => Convert.ToString(p["IndexName"])))
+        {
+            PrimaryKeyConstraintModel primaryKeyConstraintModel = this.CreatePrimaryKeyConstraintModel(row.ToArray());
+            tableModel.Constraints.Add(primaryKeyConstraintModel);
+        }
+        // Indexes
+        foreach (IGrouping<string, DataRow> row in this._tIndices.Select(string.Format(System.Globalization.CultureInfo.InvariantCulture, "[Schema] = '{0}' AND [TableName] = '{1}' AND [IsPrimaryKey] = 0", tableModel.Schema, tableModel.Name)).GroupBy(p => Convert.ToString(p["IndexName"])))
+        {
+            IndexModel indexModel = this.CreateIndexModel(row.ToArray());
+            tableModel.Indexes.Add(indexModel);
+        }
+
+        return tableModel;
+    }
+
+    private ColumnModel CreateColumnModel(DataRow columnRow)
+    {
+        ColumnModel columnModel = new ColumnModel();
+        columnModel.Name = Convert.ToString(columnRow["ColumnName"]);
+        columnModel.Type = DatabaseHelper.GetDbType((SqlColumnType)Enum.Parse(typeof(SqlColumnType), Convert.ToString(columnRow["Type"])));
+        columnModel.Length = Convert.ToInt32(columnRow["Length"]);
+        columnModel.Precision = !Convert.IsDBNull(columnRow["Precision"]) ? (int?)Convert.ToInt32(columnRow["Precision"]) : null;
+        columnModel.Scale = !Convert.IsDBNull(columnRow["Scale"]) ? (int?)Convert.ToInt32(columnRow["Scale"]) : null;
+        columnModel.Nullable = Convert.ToBoolean(columnRow["Nullable"]);
+        columnModel.Collation = !Convert.IsDBNull(columnRow["Collation"]) ? Convert.ToString(columnRow["Collation"]) : null;
+        columnModel.DefaultValue = !Convert.IsDBNull(columnRow["DefaultValue"]) ? Convert.ToString(columnRow["DefaultValue"]) : null;
+        columnModel.Description = !Convert.IsDBNull(columnRow["Description"]) ? Convert.ToString(columnRow["Description"]) : null;
+        return columnModel;
+    }
+
+    private IdentityModel CreateIdentityModel(DataRow identityRow)
+    {
+        IdentityModel identityModel = new IdentityModel();
+        identityModel.ColumnName = Convert.ToString(identityRow["ColumnName"]);
+        identityModel.Seed = Convert.ToInt64(identityRow["Seed"]);
+        identityModel.Increment = Convert.ToInt64(identityRow["Increment"]);
+        return identityModel;
+    }
+
+    private PrimaryKeyConstraintModel CreatePrimaryKeyConstraintModel(DataRow[] primaryKeyConstraintRows)
+    {
+        PrimaryKeyConstraintModel primaryKeyConstraintModel = new PrimaryKeyConstraintModel();
+        primaryKeyConstraintModel.Name = Convert.ToString(primaryKeyConstraintRows[0]["IndexName"]);
+        primaryKeyConstraintModel.Columns = primaryKeyConstraintRows.Select(p => Convert.ToString(p["ColumnName"])).ToArray();
+        return primaryKeyConstraintModel;
+    }
+
+    private IndexModel CreateIndexModel(DataRow[] indexRows)
+    {
+        IndexModel indexModel = new IndexModel();
+        indexModel.Name = Convert.ToString(indexRows[0]["IndexName"]);
+        indexModel.IsPrimaryKey = Convert.ToBoolean(indexRows[0]["IsPrimaryKey"]);
+        indexModel.IsClustered = Convert.ToBoolean(indexRows[0]["IsClustered"]);
+        indexModel.IsUnique = Convert.ToBoolean(indexRows[0]["IsUnique"]);
+        foreach (DataRow row in indexRows)
+        {
+            ColumnSortModel columnSortModel = new ColumnSortModel(Convert.ToString(row["ColumnName"]), Convert.ToBoolean(row["IsDescending"]) ? SortOrder.Descending : SortOrder.Ascending);
+            indexModel.ColumnSorts.Add(columnSortModel);
+        }
+        return indexModel;
+    }
+
+    private RelationshipModel CreateRelationshipModel(DataRow[] relationshipRows)
+    {
+        RelationshipModel relationshipModel = new RelationshipModel();
+        relationshipModel.Name = Convert.ToString(relationshipRows[0]["ForeignKeyName"]);
+        relationshipModel.PrincipalEnd = new EndModel(Convert.ToString(relationshipRows[0]["PrincipalTableSchema"]), Convert.ToString(relationshipRows[0]["PrincipalTableName"]), relationshipRows.Select(p => Convert.ToString(p["PrincipalColumnName"])).ToArray());
+        relationshipModel.DependentEnd = new EndModel(Convert.ToString(relationshipRows[0]["DependentTableSchema"]), Convert.ToString(relationshipRows[0]["DependentTableName"]), relationshipRows.Select(p => Convert.ToString(p["DependentColumnName"])).ToArray());
+        return relationshipModel;
+    }
+}
+
+public enum Multiplicity
+{
+    ZeroOrOne = 1,
+    One = 1,
+    ZeroOrMany = -1,
+}
+
+public class ColumnModel : IXmlSerializable
+{
+    #region Field & Property
+    private TableModel _table;
+    public TableModel Table
+    {
+        get
+        {
+            return this._table;
+        }
+        internal set
+        {
+            this._table = value;
+        }
+    }
+
+    private string _name;
+    public string Name
+    {
+        get
+        {
+            return this._name;
+        }
+        internal set
+        {
+            this._name = value;
+        }
+    }
+
+    private DbType _type;
+    public DbType Type
+    {
+        get
+        {
+            return this._type;
+        }
+        set
+        {
+            this._type = value;
+        }
+    }
+        
+    private int? _length;
+    public int? Length
+    {
+        get
+        {
+            return this._length;
+        }
+        set
+        {
+            this._length = value;
+        }
+    }
+
+    private int? _precision;
+    public int? Precision
+    {
+        get
+        {
+            return this._precision;
+        }
+        set
+        {
+            this._precision = value;
+        }
+    }
+
+    private int? _scale;
+    public int? Scale
+    {
+        get
+        {
+            return this._scale;
+        }
+        set
+        {
+            this._scale = value;
+        }
+    }
+        
+    private bool _nullable;
+    public bool Nullable
+    {
+        get
+        {
+            return this._nullable;
+        }
+        set
+        {
+            this._nullable = value;
+        }
+    }
+
+    private string _collation;
+    public string Collation
+    {
+        get
+        {
+            return this._collation;
+        }
+        set
+        {
+            this._collation = value;
+        }
+    }
+
+    private string _defaultValue;
+    public string DefaultValue
+    {
+        get
+        {
+            return this._defaultValue;
+        }
+        set
+        {
+            this._defaultValue = value;
+        }
+    }
+
+    private string _description;
+    public string Description
+    {
+        get
+        {
+            return this._description;
+        }
+        set
+        {
+            this._description = value;
+        }
+    }
+    #endregion Field & Property
+
+    #region Constructor
+    internal ColumnModel()
+    {
+    }
+
+    public ColumnModel(string name)
+    {
+        if (name == null)
+        {
+            throw new ArgumentNullException("name");
+        }
+        if (name.Length == 0)
+        {
+            throw new ArgumentException(Strings.ColumnModel_Exception_NameEmpty);
+        }
+
+        this._name = name;
+    }
+    #endregion Constructor
+
+    #region Method
+    #region IXmlSerializable Members
+    internal const string XmlElement_Tag = "Column";
+    internal const string XmlAttribute_Name = "Name";
+    internal const string XmlAttribute_Type = "Type";
+    internal const string XmlAttribute_Length = "Length";
+    internal const string XmlAttribute_Precision = "Precision";
+    internal const string XmlAttribute_Scale = "Scale";
+    internal const string XmlAttribute_Nullable = "Nullable";
+    internal const string XmlAttribute_Collation = "Collation";
+    internal const string XmlAttribute_DefaultValue = "DefaultValue";
+    internal const string XmlAttribute_Description = "Description";
+
+    public System.Xml.Schema.XmlSchema GetSchema()
+    {
+        return null;
+    }
+
+    public void ReadXml(System.Xml.XmlReader reader)
+    {
+        // Attributes
+        while (reader.MoveToNextAttribute())
+        {
+            switch (reader.Name)
+            {
+                case XmlAttribute_Name:
+                    this.Name = reader.Value;
+                    break;
+                case XmlAttribute_Type:
+                    this.Type = (DbType)Enum.Parse(typeof(DbType), reader.Value);
+                    break;
+                case XmlAttribute_Length:
+                    if (reader.Value != "max")
+                    {
+                        this.Length = Convert.ToInt32(reader.Value);
+                    }
+                    else
+                    {
+                        this.Length = -1;
+                    }
+                    break;
+                case XmlAttribute_Precision:
+                    this.Precision = Convert.ToInt32(reader.Value);
+                    break;
+                case XmlAttribute_Scale:
+                    this.Scale = Convert.ToInt32(reader.Value);
+                    break;
+                case XmlAttribute_Nullable:
+                    this.Nullable = Convert.ToBoolean(reader.Value);
+                    break;
+                case XmlAttribute_Collation:
+                    this.Collation = Convert.ToString(reader.Value);
+                    break;
+                case XmlAttribute_DefaultValue:
+                    this.DefaultValue = Convert.ToString(reader.Value);
+                    break;
+                case XmlAttribute_Description:
+                    this.Description = Convert.ToString(reader.Value);
+                    break;
+            }
+        }
+
+        reader.MoveToContent();
+
+        // Elements
+        if (!reader.IsEmptyElement)
+        {
+            reader.ReadStartElement();
+            reader.ReadEndElement();
+        }
+        else
+        {
+            reader.Read();
+        }
+    }
+
+    public void WriteXml(System.Xml.XmlWriter writer)
+    {
+        writer.WriteAttributeString(XmlAttribute_Name, this.Name);
+        writer.WriteAttributeString(XmlAttribute_Type, this.Type.ToString());
+        if (this.Length.HasValue)
+        {
+            writer.WriteAttributeString(XmlAttribute_Length, this.Length.ToString());
+        }
+        if (this.Precision.HasValue)
+        {
+            writer.WriteAttributeString(XmlAttribute_Precision, this.Precision.ToString());
+        }
+        if (this.Scale.HasValue)
+        {
+            writer.WriteAttributeString(XmlAttribute_Scale, this.Scale.ToString());
+        }
+        writer.WriteAttributeString(XmlAttribute_Nullable, this.Nullable.ToString());
+        if (this.Collation != default(string))
+        {
+            writer.WriteAttributeString(XmlAttribute_Collation, this.Collation.ToString());
+        }
+        if (this.DefaultValue != default(string))
+        {
+            writer.WriteAttributeString(XmlAttribute_DefaultValue, this.DefaultValue.ToString());
+        }
+        if (this.Description != default(string))
+        {
+            writer.WriteAttributeString(XmlAttribute_Description, this.Description.ToString());
+        }
+    }
+    #endregion IXmlSerializable Members
+
+    public override string ToString()
+    {
+        return this._name;
+    }
+    #endregion Method
+}
+
+public class ColumnModelCollection : Collection<ColumnModel>, IXmlSerializable
+{
+    #region Static
+    protected const char ColumnSeparator = ',';
+    #endregion Static
+
+    #region Field & Property
+    private TableModel _table;
+    public TableModel Table
+    {
+        get
+        {
+            return this._table;
+        }
+    }
+
+    public ColumnModel this[string name]
+    {
+        get
+        {
+            if (name == null)
+            {
+                throw new ArgumentNullException("name");
+            }
+
+            foreach (ColumnModel model in this)
+            {
+                if (name.Equals(model.Name, StringComparison.Ordinal))
+                {
+                    return model;
+                }
+            }
+
+            return null;
+        }
+    }
+    #endregion Field & Property
+
+    #region Constructor
+    public ColumnModelCollection(TableModel table)
+    {
+        this._table = table;
+    }
+    #endregion Constructor
+
+    #region Method
+    public void Add(string name, DbType type)
+    {
+        ColumnModel column = new ColumnModel(name);
+        column.Type = type;
+        this.Add(column);
+    }
+
+    public void Add(string name, DbType type, bool nullable)
+    {
+        ColumnModel column = new ColumnModel(name);
+        column.Type = type;
+        column.Nullable = nullable;
+        this.Add(column);
+    }
+
+    public void Add(string name, DbType type, int length, bool nullable)
+    {
+        ColumnModel column = new ColumnModel(name);
+        column.Type = type;
+        column.Length = length;
+        column.Nullable = nullable;
+        this.Add(column);
+    }
+
+    public void Add(string name, DbType type, int precision, int scale, bool nullable)
+    {
+        ColumnModel column = new ColumnModel(name);
+        column.Type = type;
+        column.Precision = precision;
+        column.Scale = scale;
+        column.Nullable = nullable;
+        this.Add(column);
+    }
+
+    protected override void InsertItem(int index, ColumnModel item)
+    {
+        if (this[item.Name] != null)
+        {
+            throw new InvalidOperationException(Strings.ColumnModelCollection_Exception_NameExists);
+        }
+        item.Table = this._table;
+
+        base.InsertItem(index, item);
+    }
+
+    protected override void RemoveItem(int index)
+    {
+        this[index].Table = null;
+
+        base.RemoveItem(index);
+    }
+
+    #region IXmlSerializable Members
+    internal const string XmlElement_Tag = "Columns";
+
+    public System.Xml.Schema.XmlSchema GetSchema()
+    {
+        return null;
+    }
+
+    public void ReadXml(System.Xml.XmlReader reader)
+    {
+        // Attributes
+        while (reader.MoveToNextAttribute())
+        {
+        }
+
+        reader.MoveToContent();
+
+        // Element
+        if (!reader.IsEmptyElement)
+        {
+            reader.ReadStartElement();
+            while (reader.NodeType == System.Xml.XmlNodeType.Element)
+            {
+                switch (reader.Name)
+                {
+                    case ColumnModel.XmlElement_Tag:
+                        ColumnModel column = new ColumnModel();
+                        column.ReadXml(reader);
+                        this.Add(column);
+                        break;
+                    default:
+                        throw new InvalidOperationException(reader.Name);
+                }
+            }
+            reader.ReadEndElement();
+        }
+        else
+        {
+            reader.Read();
+        }
+    }
+
+    public void WriteXml(System.Xml.XmlWriter writer)
+    {
+        foreach (ColumnModel item in this)
+        {
+            writer.WriteStartElement(ColumnModel.XmlElement_Tag);
+            item.WriteXml(writer);
+            writer.WriteEndElement();
+        }
+    }
+    #endregion IXmlSerializable Members
+
+    public override string ToString()
+    {
+        if (this.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < this.Count; i++)
+        {
+            if (i != 0)
+            {
+                builder.Append(ColumnSeparator);
+            }
+
+            builder.Append(this[i].Name);
+        }
+        return builder.ToString();
+    }
+    #endregion Method
+
+}
+
+public class ColumnSortModel : IXmlSerializable
+{
+    #region Field & Property
+    private IndexModel _index;
+    public IndexModel Index
+    {
+        get
+        {
+            return this._index;
+        }
+        internal set
+        {
+            this._index = value;
+        }
+    }
+
+    private string _column;
+    public string Column
+    {
+        get
+        {
+            return this._column;
+        }
+        set
+        {
+            this._column = value;
+        }
+    }
+
+    private SortOrder _sort;
+    public SortOrder Sort
+    {
+        get
+        {
+            return this._sort;
+        }
+        set
+        {
+            this._sort = value;
+        }
+    }
+    #endregion Field & Property
+
+    #region Constructor
+    internal ColumnSortModel()
+    {
+    }
+
+    public ColumnSortModel(string column, SortOrder sortOrder)
+    {
+        this._column = column;
+        this._sort = sortOrder;
+    }
+    #endregion Constructor
+
+    #region Method
+    #region IXmlSerializable Members
+    internal const string XmlElement_Tag = "ColumnSort";
+    internal const string XmlAttribute_Column = "Column";
+    internal const string XmlAttribute_Sort = "Sort";
+
+    public System.Xml.Schema.XmlSchema GetSchema()
+    {
+        return null;
+    }
+
+    public void ReadXml(System.Xml.XmlReader reader)
+    {
+        // Attributes
+        while (reader.MoveToNextAttribute())
+        {
+            switch (reader.Name)
+            {
+                case XmlAttribute_Column:
+                    this.Column = reader.Value;
+                    break;
+                case XmlAttribute_Sort:
+                    this.Sort = (SortOrder)Enum.Parse(typeof(SortOrder), reader.Value);
+                    break;
+            }
+        }
+
+        reader.MoveToContent();
+
+        // Elements
+        if (!reader.IsEmptyElement)
+        {
+            reader.ReadStartElement();
+            reader.ReadEndElement();
+        }
+        else
+        {
+            reader.Read();
+        }
+    }
+
+    public void WriteXml(System.Xml.XmlWriter writer)
+    {
+        writer.WriteAttributeString(XmlAttribute_Column, this.Column);
+        writer.WriteAttributeString(XmlAttribute_Sort, this.Sort.ToString());
+    }
+    #endregion IXmlSerializable Members
+
+    public override string ToString()
+    {
+        string text = string.Format(
+            System.Globalization.CultureInfo.InvariantCulture,
+            "{0} {1}",
+            this._column,
+            this._sort);
+        return text;
+    }
+    #endregion Method
+}
+
+public class ColumnSortModelCollection : Collection<ColumnSortModel>, IXmlSerializable
+{
+    #region Field & Property
+    private IndexModel _index;
+    public IndexModel Index
+    {
+        get
+        {
+            return this._index;
+        }
+    }
+    #endregion Field & Property
+
+    #region Constructor
+    public ColumnSortModelCollection(IndexModel index)
+    {
+        this._index = index;
+    }
+    #endregion Constructor
+
+    #region Method
+    protected override void InsertItem(int index, ColumnSortModel item)
+    {
+        item.Index = this._index;
+
+        base.InsertItem(index, item);
+    }
+
+    protected override void RemoveItem(int index)
+    {
+        this[index].Index = null;
+
+        base.RemoveItem(index);
+    }
+
+    #region IXmlSerializable Members
+    internal const string XmlElement_Tag = "ColumnSorts";
+
+    public System.Xml.Schema.XmlSchema GetSchema()
+    {
+        return null;
+    }
+
+    public void ReadXml(System.Xml.XmlReader reader)
+    {
+        // Attributes
+        while (reader.MoveToNextAttribute())
+        {
+        }
+
+        reader.MoveToContent();
+
+        // Elements
+        if (!reader.IsEmptyElement)
+        {
+            reader.ReadStartElement();
+            while (reader.NodeType == System.Xml.XmlNodeType.Element)
+            {
+                switch (reader.Name)
+                {
+                    case ColumnSortModel.XmlElement_Tag:
+                        ColumnSortModel columnSort = new ColumnSortModel();
+                        columnSort.ReadXml(reader);
+                        this.Add(columnSort);
+                        break;
+                    default:
+                        throw new InvalidOperationException(reader.Name);
+                }
+            }
+            reader.ReadEndElement();
+        }
+        else
+        {
+            reader.Read();
+        }
+    }
+
+    public void WriteXml(System.Xml.XmlWriter writer)
+    {
+        foreach (ColumnSortModel item in this)
+        {
+            writer.WriteStartElement(ColumnSortModel.XmlElement_Tag);
+            item.WriteXml(writer);
+            writer.WriteEndElement();
+        }
+    }
+    #endregion IXmlSerializable Members
+    #endregion Method
+}
+
+public abstract class ConstraintModel : IXmlSerializable
+{
+    #region Field & Property
+    private string _name;
+    public string Name
+    {
+        get
+        {
+            return this._name;
+        }
+        set
+        {
+            this._name = value;
+        }
+    }
+
+    private TableModel _table;
+    public TableModel Table
+    {
+        get
+        {
+            return this._table;
+        }
+        internal set
+        {
+            this._table = value;
+        }
+    }
+    #endregion Field & Property
+
+    #region Constructor
+    public ConstraintModel()
+    {
+    }
+
+    public ConstraintModel(string name)
+    {
+        this._name = name;
+    }
+    #endregion Constructor
+
+    #region Method
+    #region IXmlSerializable Members
+    internal const string XmlAttribute_Name = "name";
+
+    public System.Xml.Schema.XmlSchema GetSchema()
+    {
+        return null;
+    }
+
+    public abstract void ReadXml(System.Xml.XmlReader reader);
+
+    public abstract void WriteXml(System.Xml.XmlWriter writer);
+    #endregion IXmlSerializable Members
+    #endregion Method
+}
+
+[XmlRoot(ElementName = PrimaryKeyConstraintModel.XmlElement_Tag)]
+public class PrimaryKeyConstraintModel : ConstraintModel
+{
+    #region Field & Property
+    private string[] _columns;
+    public string[] Columns
+    {
+        get
+        {
+            return this._columns;
+        }
+        set
+        {
+            this._columns = value;
+        }
+    }
+    #endregion Field & Property
+
+    #region Constructor
+    public PrimaryKeyConstraintModel()
+    {
+    }
+
+    public PrimaryKeyConstraintModel(string[] columns)
+        : this(null, columns)
+    {
+    }
+
+    public PrimaryKeyConstraintModel(string name, string[] columns)
+        : base(name)
+    {
+        this._columns = columns;
+    }
+    #endregion Constructor
+
+    #region IXmlSerializable Members
+    internal const string XmlElement_Tag = "PrimaryKey";
+    internal const string XmlAttribute_Columns = "Columns";
+
+    public override void ReadXml(System.Xml.XmlReader reader)
+    {
+        // Attributes
+        while (reader.MoveToNextAttribute())
+        {
+            switch (reader.Name)
+            {
+                case XmlAttribute_Name:
+                    this.Name = reader.Value;
+                    break;
+                case XmlAttribute_Columns:
+                    this.Columns = reader.Value.Split(new string[] { DatabaseHelper.Separator }, StringSplitOptions.RemoveEmptyEntries);
+                    break;
+            }
+        }
+
+        reader.MoveToContent();
+
+        // Element
+        if (!reader.IsEmptyElement)
+        {
+            reader.ReadStartElement();
+            reader.ReadEndElement();
+        }
+        else
+        {
+            reader.Read();
+        }
+    }
+
+    public override void WriteXml(System.Xml.XmlWriter writer)
+    {
+        if (this.Name != default(string))
+        {
+            writer.WriteAttributeString(XmlAttribute_Name, this.Name);
+        }
+        if (this.Columns != null)
+        {
+            writer.WriteAttributeString(XmlAttribute_Columns, string.Join(DatabaseHelper.Separator, this.Columns));
+        }
+    }
+    #endregion IXmlSerializable Members
+}
+
+[XmlRoot(ElementName = UniqueConstraintModel.XmlElement_Tag)]
+public class UniqueConstraintModel : ConstraintModel
+{
+    #region Field & Property
+    private string[] _columns;
+    public string[] Columns
+    {
+        get
+        {
+            return this._columns;
+        }
+        set
+        {
+            this._columns = value;
+        }
+    }
+    #endregion Field & Property
+
+    #region Constructor
+    public UniqueConstraintModel()
+    {
+    }
+
+    public UniqueConstraintModel(string[] columns)
+        : this(null, columns)
+    {
+    }
+
+    public UniqueConstraintModel(string name, string[] columns)
+        : base(name)
+    {
+        this._columns = columns;
+    }
+    #endregion Constructor
+
+    #region IXmlSerializable Members
+    internal const string XmlElement_Tag = "Unique";
+    internal const string XmlAttribute_Columns = "Columns";
+
+    public override void ReadXml(System.Xml.XmlReader reader)
+    {
+        // Attributes
+        while (reader.MoveToNextAttribute())
+        {
+            switch (reader.Name)
+            {
+                case XmlAttribute_Name:
+                    this.Name = reader.Value;
+                    break;
+                case XmlAttribute_Columns:
+                    this.Columns = reader.Value.Split(new string[] { DatabaseHelper.Separator }, StringSplitOptions.RemoveEmptyEntries);
+                    break;
+            }
+        }
+
+        reader.MoveToContent();
+
+        // Element
+        if (!reader.IsEmptyElement)
+        {
+            reader.ReadStartElement();
+            reader.ReadEndElement();
+        }
+        else
+        {
+            reader.Read();
+        }
+    }
+
+    public override void WriteXml(System.Xml.XmlWriter writer)
+    {
+        if (this.Name != default(string))
+        {
+            writer.WriteAttributeString(XmlAttribute_Name, this.Name);
+        }
+        if (this.Columns != null)
+        {
+            writer.WriteAttributeString(XmlAttribute_Columns, string.Join(DatabaseHelper.Separator, this.Columns));
+        }
+    }
+    #endregion IXmlSerializable Members
+}
+        
+[XmlRoot(ElementName = CheckConstraintModel.XmlElement_Tag)]
+public class CheckConstraintModel : ConstraintModel
+{
+    #region Field & Property
+    private string _expression;
+    public string Expression
+    {
+        get
+        {
+            return this._expression;
+        }
+        set
+        {
+            this._expression = value;
+        }
+    }
+    #endregion Field & Property
+
+    #region Constructor
+    public CheckConstraintModel()
+    {
+    }
+
+    public CheckConstraintModel(string expression)
+        : this(null, expression)
+    {
+    }
+
+    public CheckConstraintModel(string name, string expression)
+        : base(name)
+    {
+        this._expression = expression;
+    }
+    #endregion Constructor
+
+    #region IXmlSerializable Members
+    internal const string XmlElement_Tag = "Check";
+    internal const string XmlAttribute_Expression = "Expression";
+
+    public override void ReadXml(System.Xml.XmlReader reader)
+    {
+        // Attributes
+        while (reader.MoveToNextAttribute())
+        {
+            switch (reader.Name)
+            {
+                case XmlAttribute_Name:
+                    this.Name = reader.Value;
+                    break;
+                case XmlAttribute_Expression:
+                    this.Expression = reader.Value;
+                    break;
+            }
+        }
+
+        reader.MoveToContent();
+
+        // Element
+        if (!reader.IsEmptyElement)
+        {
+            reader.ReadStartElement();
+            reader.ReadEndElement();
+        }
+        else
+        {
+            reader.Read();
+        }
+    }
+
+    public override void WriteXml(System.Xml.XmlWriter writer)
+    {
+        if (this.Name != default(string))
+        {
+            writer.WriteAttributeString(XmlAttribute_Name, this.Name);
+        }
+        if (this.Expression != null)
+        {
+            writer.WriteAttributeString(XmlAttribute_Expression, this._expression);
+        }
+    }
+    #endregion IXmlSerializable Members
+}
+
+[XmlRoot(ElementName = DefaultConstraintModel.XmlElement_Tag)]
+public class DefaultConstraintModel : ConstraintModel
+{
+    #region Field & Property
+    private string _column;
+    public string Column
+    {
+        get
+        {
+            return this._column;
+        }
+        set
+        {
+            this._column = value;
+        }
+    }
+
+    private string _value;
+    public string Value
+    {
+        get
+        {
+            return this._value;
+        }
+        set
+        {
+            this._value = value;
+        }
+    }
+    #endregion Field & Property
+
+    #region Constructor
+    public DefaultConstraintModel()
+    {
+    }
+
+    public DefaultConstraintModel(string column, string value)
+        : this(null, column, value)
+    {
+    }
+
+    public DefaultConstraintModel(string name, string column, string value)
+        : base(name)
+    {
+        this._column = column;
+        this._value = value;
+    }
+    #endregion Constructor
+
+    #region IXmlSerializable Members
+    internal const string XmlElement_Tag = "Default";
+    internal const string XmlAttribute_Column = "Column";
+    internal const string XmlAttribute_Value = "Value";
+
+    public override void ReadXml(System.Xml.XmlReader reader)
+    {
+        // Attributes
+        while (reader.MoveToNextAttribute())
+        {
+            switch (reader.Name)
+            {
+                case XmlAttribute_Name:
+                    this.Name = reader.Value;
+                    break;
+                case XmlAttribute_Column:
+                    this.Column = reader.Value;
+                    break;
+                case XmlAttribute_Value:
+                    this.Value = reader.Value;
+                    break;
+            }
+        }
+
+        reader.MoveToContent();
+
+        // Element
+        if (!reader.IsEmptyElement)
+        {
+            reader.ReadStartElement();
+            reader.ReadEndElement();
+        }
+        else
+        {
+            reader.Read();
+        }
+    }
+
+    public override void WriteXml(System.Xml.XmlWriter writer)
+    {
+        if (this.Name != default(string))
+        {
+            writer.WriteAttributeString(XmlAttribute_Name, this.Name);
+        }
+        if (this.Column != null)
+        {
+            writer.WriteAttributeString(XmlAttribute_Column, this.Column);
+        }
+        if (this.Value != null)
+        {
+            writer.WriteAttributeString(XmlAttribute_Value, this.Value);
+        }
+    }
+    #endregion IXmlSerializable Members
+}
+
+public class ConstraintModelCollection : Collection<ConstraintModel>, IXmlSerializable
+{
+    #region Field & Property
+    private TableModel _table;
+    public TableModel Table
+    {
+        get
+        {
+            return this._table;
+        }
+    }
+    #endregion Field & Property
+
+    #region Constructor
+    public ConstraintModelCollection(TableModel table)
+    {
+        this._table = table;
+    }
+    #endregion Constructor
+
+    #region Method
+    protected override void InsertItem(int index, ConstraintModel item)
+    {
+        item.Table = this._table;
+
+        base.InsertItem(index, item);
+    }
+
+    protected override void RemoveItem(int index)
+    {
+        this[index].Table = null;
+
+        base.RemoveItem(index);
+    }
+
+    #region IXmlSerializable Members
+    internal const string XmlElement_Tag = "Constraints";
+
+    public System.Xml.Schema.XmlSchema GetSchema()
+    {
+    return null;
+    }
+
+    public void ReadXml(System.Xml.XmlReader reader)
+    {
+    // Attributes
+    while (reader.MoveToNextAttribute())
+    {
+    }
+
+    reader.MoveToContent();
+
+    // Elements
+        if (!reader.IsEmptyElement)
+        {
+            reader.ReadStartElement();
+            while (reader.NodeType == System.Xml.XmlNodeType.Element)
+            {
+                switch (reader.Name)
+                {
+                    case UniqueConstraintModel.XmlElement_Tag:
+                    {
+                        ConstraintModel constraint = new UniqueConstraintModel();
+                        constraint.ReadXml(reader);
+                        this.Add(constraint);
+                    }
+                break;
+                case PrimaryKeyConstraintModel.XmlElement_Tag:
+                {
+                    ConstraintModel constraint = new PrimaryKeyConstraintModel();
+                    constraint.ReadXml(reader);
+                    this.Add(constraint);
+                }
+                break;
+                case CheckConstraintModel.XmlElement_Tag:
+                {
+                    ConstraintModel constraint = new CheckConstraintModel();
+                    constraint.ReadXml(reader);
+                    this.Add(constraint);
+                }
+                break;
+                case DefaultConstraintModel.XmlElement_Tag:
+                {
+                    ConstraintModel constraint = new DefaultConstraintModel();
+                    constraint.ReadXml(reader);
+                    this.Add(constraint);
+                }
+                break;
+                default:
+                throw new InvalidOperationException(reader.Name);
+            }
+        }
+        reader.ReadEndElement();
+    }
+    else
+    {
+    reader.Read();
+}
+    }
+
+    public void WriteXml(System.Xml.XmlWriter writer)
+    {
+    foreach (ConstraintModel item in this)
+    {
+    XmlRootAttribute attribute = Attribute.GetCustomAttribute(item.GetType(), typeof(XmlRootAttribute)) as XmlRootAttribute;
+    writer.WriteStartElement(attribute.ElementName);
+    item.WriteXml(writer);
+    writer.WriteEndElement();
+    }
+    }
+    #endregion IXmlSerializable Members
+    #endregion Method
+    }
+
+    [XmlRoot(ElementName = DatabaseModel.XmlElement_Tag)]
+    public class DatabaseModel : IXmlSerializable
+    {
+        #region Nested Type
+        private class DatabaseModelXmlTextWriter : XmlTextWriter
+        {
+            public DatabaseModelXmlTextWriter(Stream stream)
+                : base(stream, new UTF8Encoding(false, true))
+            {
+            }
+
+            public override void WriteStartDocument()
+            {
+                base.WriteStartDocument();
+                //this.WriteDocType("CCT", null, null, "<!ELEMENT Database (Table|View)*>");
+            }
+        }
+        #endregion Nested Type
+
+        #region Static
+        public static DatabaseModel Create(byte[] data)
+        {
+            if (data == null)
+            {
+                throw new ArgumentNullException("data");
+            }
+
+            MemoryStream stream = new MemoryStream(data);
+            return Create(stream);
+        }
+
+        public static DatabaseModel Create(Stream stream)
+        {
+            if (stream == null)
+            {
+                throw new ArgumentNullException("stream");
+            }
+
+            XmlTextReader reader = new XmlTextReader(stream);
+            reader.WhitespaceHandling = WhitespaceHandling.Significant;
+            try
+            {
+                XmlSerializer serializer = new XmlSerializer(typeof(DatabaseModel));
+                DatabaseModel model = serializer.Deserialize(reader) as DatabaseModel;
+                return model;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+        #endregion Static
+
+        #region Field & Property
+        private string _name;
+        public string Name
+        {
+            get
+            {
+                return this._name;
+            }
+            set
+            {
+                this._name = value;
+            }
+        }
+
+        private TableModelCollection _tables;
+        public TableModelCollection Tables
+        {
+            get
+            {
+                if (this._tables == null)
+                {
+                    this._tables = new TableModelCollection(this);
+                }
+
+                return this._tables;
+            }
+        }
+
+        private RelationshipModelCollection _relationships;
+        public RelationshipModelCollection Relationships
+        {
+            get
+            {
+                if (this._relationships == null)
+                {
+                    this._relationships = new RelationshipModelCollection(this);
+                }
+
+                return this._relationships;
+            }
+        }
+        #endregion Field & Property
+
+        #region Constructor
+        public DatabaseModel()
+        {
+        }
+
+        public DatabaseModel(string name)
+        {
+            this._name = name;
+        }
+        #endregion Constructor
+
+        #region Method
+        #region IXmlSerializable Members
+        internal const string XmlElement_Tag = "Database";
+        internal const string XmlAttribute_Name = "Name";
+
+        public System.Xml.Schema.XmlSchema GetSchema()
+        {
+            return null;
+        }
+
+        public void ReadXml(System.Xml.XmlReader reader)
+        {
+            // Attributes
+            while (reader.MoveToNextAttribute())
+            {
+                switch (reader.Name)
+                {
+                    case XmlAttribute_Name:
+                        this.Name = reader.Value;
+                        break;
+                }
+            }
+
+            reader.MoveToContent();
+
+            // Element
+            if (!reader.IsEmptyElement)
+            {
+                reader.ReadStartElement();
+                while (reader.NodeType == System.Xml.XmlNodeType.Element)
+                {
+                    switch (reader.Name)
+                    {
+                        case TableModelCollection.XmlElement_Tag:
+                            this.Tables.ReadXml(reader);
+                            break;
+                        case RelationshipModelCollection.XmlElement_Tag:
+                            this.Relationships.ReadXml(reader);
+                            break;
+                        default:
+                            throw new InvalidOperationException(reader.Name);
+                    }
+                }
+                reader.ReadEndElement();
+            }
+            else
+            {
+                reader.Read();
+            }
+        }
+
+        public void WriteXml(System.Xml.XmlWriter writer)
+        {
+            // Attributes
+            if (this.Name != default(string))
+            {
+                writer.WriteAttributeString(XmlAttribute_Name, this._name);
+            }
+            // Tables
+            writer.WriteStartElement(TableModelCollection.XmlElement_Tag);
+            this.Tables.WriteXml(writer);
+            writer.WriteEndElement();
+            // Relationship
+            writer.WriteStartElement(RelationshipModelCollection.XmlElement_Tag);
+            this.Relationships.WriteXml(writer);
+            writer.WriteEndElement();
+        }
+        #endregion IXmlSerializable Members
+
+        public byte[] ToBytes()
+        {
+            MemoryStream stream = new MemoryStream();
+            DatabaseModelXmlTextWriter writer = new DatabaseModelXmlTextWriter(stream);
+            (new XmlSerializer(typeof(DatabaseModel))).Serialize(
+                writer,
+                this);
+            return stream.ToArray();
+        }
+
+        public override string ToString()
+        {
+            return this._name;
+        }
+        #endregion Method
+    }
+
+    public class EndModel : IXmlSerializable
+    {
+        #region Field & Property
+        private RelationshipModel _relationship;
+        public RelationshipModel Relationship
+        {
+            get
+            {
+                return this._relationship;
+            }
+            internal set
+            {
+                this._relationship = value;
+            }
+        }
+
+        private string _schema;
+        public string Schema
+        {
+            get
+            {
+                return this._schema;
+            }
+            set
+            {
+                this._schema = value;
+            }
+        }
+
+        private string _table;
+        public string Table
+        {
+            get
+            {
+                return this._table;
+            }
+            set
+            {
+                this._table = value;
+            }
+        }
+
+        private string[] _columns;
+        public string[] Columns
+        {
+            get
+            {
+                return this._columns;
+            }
+            set
+            {
+                this._columns = value;
+            }
+        }
+        #endregion Field & Property
+
+        #region Constructor
+        internal EndModel()
+        {
+        }
+
+        public EndModel(string table, string[] columns)
+            : this(TableModel.DefaultSchemaName, table, columns)
+        {
+        }
+
+        public EndModel(string schema, string table, string[] columns)
+        {
+            if (schema == null)
+            {
+                throw new ArgumentNullException("schema");
+            }
+            if (table == null)
+            {
+                throw new ArgumentNullException("table");
+            }
+
+            this._schema = schema;
+            this._table = table;
+            this._columns = columns;
+        }
+        #endregion Constructor
+
+        #region IXmlSerializable Members
+        internal const string XmlElement_Principal = "PrincipalEnd";
+        internal const string XmlElement_Dependent = "DependentEnd";
+        internal const string XmlAttribute_Schema = "Schema";
+        internal const string XmlAttribute_Table = "Table";
+        internal const string XmlAttribute_Columns = "Columns";
+
+        public System.Xml.Schema.XmlSchema GetSchema()
+        {
+            return null;
+        }
+
+        public void ReadXml(System.Xml.XmlReader reader)
+        {
+            // Attributes
+            while (reader.MoveToNextAttribute())
+            {
+                switch (reader.Name)
+                {
+                    case XmlAttribute_Schema:
+                        this.Schema = reader.Value;
+                        break;
+                    case XmlAttribute_Table:
+                        this.Table = reader.Value;
+                        break;
+                    case XmlAttribute_Columns:
+                        this.Columns = reader.Value.Split(new string[] { DatabaseHelper.Separator }, StringSplitOptions.RemoveEmptyEntries);
+                        break;
+                }
+            }
+
+            reader.MoveToContent();
+
+            // Element
+            if (!reader.IsEmptyElement)
+            {
+                reader.ReadStartElement();
+                reader.ReadEndElement();
+            }
+            else
+            {
+                reader.Read();
+            }
+        }
+
+        public void WriteXml(System.Xml.XmlWriter writer)
+        {
+            // Attributes
+            if (this.Schema != default(string))
+            {
+                writer.WriteAttributeString(XmlAttribute_Schema, this.Schema);
+            }
+            if (this.Table != default(string))
+            {
+                writer.WriteAttributeString(XmlAttribute_Table, this.Table);
+            }
+            if (this.Columns != null)
+            {
+                writer.WriteAttributeString(XmlAttribute_Columns, string.Join(DatabaseHelper.Separator, this.Columns));
+            }
+        }
+        #endregion IXmlSerializable Members
+    }
+
+    public class IdentityModel : IExpressible, IXmlSerializable
+    {
+        #region Static
+        private const long DefaultSeed = 1;
+        private const long DefaultIncrement = 1;
+        private const char Separator_SeedIncrement = ',';
+        #endregion Static
+
+        #region Field & Property
+        private TableModel _table;
+        public TableModel Table
+        {
+            get
+            {
+                return this._table;
+            }
+            internal set
+            {
+                this._table = value;
+            }
+        }
+
+        private string _columnName;
+        public string ColumnName
+        {
+            get
+            {
+                return this._columnName;
+            }
+            set
+            {
+                this._columnName = value;
+            }
+        }
+
+        private long _seed;
+        public long Seed
+        {
+            get
+            {
+                return this._seed;
+            }
+            set
+            {
+                this._seed = value;
+            }
+        }
+
+        private long _increment;
+        public long Increment
+        {
+            get
+            {
+                return this._increment;
+            }
+            set
+            {
+                this._increment = value;
+            }
+        }
+        #endregion Field & Property
+
+        #region Constructor
+        public IdentityModel()
+        {
+        }
+
+        public IdentityModel(string columnName, long seed = DefaultSeed, long increment = DefaultIncrement)
+        {
+            this._columnName = columnName;
+            this._seed = seed;
+            this._increment = increment;
+        }
+
+        public void ParseExpression(string expression)
+        {
+            if (expression == null)
+            {
+                throw new ArgumentNullException("expression");
+            }
+
+            string[] segments = expression.Split(Separator_SeedIncrement);
+            this._seed = Convert.ToInt64(segments[0]);
+            this._increment = Convert.ToInt64(segments[1]);
+        }
+        #endregion Constructor
+
+        #region Method
+        #region IXmlSerializable Members
+        internal const string XmlElement_Tag = "Identity";
+        internal const string XmlAttribute_ColumnName = "ColumnName";
+        internal const string XmlAttribute_Seed = "Seed";
+        internal const string XmlAttribute_Increment = "Increment";
+
+        public System.Xml.Schema.XmlSchema GetSchema()
+        {
+            return null;
+        }
+
+        public void ReadXml(System.Xml.XmlReader reader)
+        {
+            // Attributes
+            while (reader.MoveToNextAttribute())
+            {
+                switch (reader.Name)
+                {
+                    case XmlAttribute_ColumnName:
+                        this.ColumnName = reader.Value;
+                        break;
+                    case XmlAttribute_Seed:
+                        this.Seed = Convert.ToInt64(reader.Value);
+                        break;
+                    case XmlAttribute_Increment:
+                        this.Increment = Convert.ToInt64(reader.Value);
+                        break;
+                }
+            }
+
+            reader.MoveToContent();
+
+            // Elements
+            if (!reader.IsEmptyElement)
+            {
+                reader.ReadStartElement();
+                reader.ReadEndElement();
+            }
+            else
+            {
+                reader.Read();
+            }
+        }
+
+        public void WriteXml(System.Xml.XmlWriter writer)
+        {
+            writer.WriteAttributeString(XmlAttribute_ColumnName, this.ColumnName);
+            writer.WriteAttributeString(XmlAttribute_Seed, this.Seed.ToString());
+            writer.WriteAttributeString(XmlAttribute_Increment, this.Increment.ToString());
+        }
+        #endregion IXmlSerializable Members
+
+        public string ToExpression()
+        {
+            StringBuilder builder = new StringBuilder();
+            builder.Append(this._seed);
+            builder.Append(Separator_SeedIncrement);
+            builder.Append(this._increment);
+            return builder.ToString();
+        }
+        #endregion Method
+    }
+
+    public class IndexModel : IXmlSerializable
+    {
+        #region Static
+        #endregion Static
+
+        #region Field & Property
+        private TableModel _table;
+        public TableModel Table
+        {
+            get
+            {
+                return this._table;
+            }
+            internal set
+            {
+                this._table = value;
+            }
+        }
+
+        private string _name;
+        public string Name
+        {
+            get
+            {
+                return this._name;
+            }
+            internal set
+            {
+                this._name = value;
+            }
+        }
+
+        private bool _isPrimaryKey;
+        public bool IsPrimaryKey
+        {
+            get
+            {
+                return this._isPrimaryKey;
+            }
+            set
+            {
+                this._isPrimaryKey = value;
+            }
+        }
+
+        private bool _isClustered;
+        public bool IsClustered
+        {
+            get
+            {
+                return this._isClustered;
+            }
+            set
+            {
+                this._isClustered = value;
+            }
+        }
+
+        private bool _isUnique;
+        public bool IsUnique
+        {
+            get
+            {
+                return this._isUnique;
+            }
+            set
+            {
+                this._isUnique = value;
+            }
+        }
+
+        private ColumnSortModelCollection _columnSorts;
+        public ColumnSortModelCollection ColumnSorts
+        {
+            get
+            {
+                if (this._columnSorts == null)
+                {
+                    this._columnSorts = new ColumnSortModelCollection(this);
+                }
+
+                return this._columnSorts;
+            }
+        }
+        #endregion Field & Property
+
+        #region Constructor
+        internal IndexModel()
+        {
+        }
+
+        public IndexModel(string name, ColumnSortModel[] columnSorts)
+        {
+            if (name == null)
+            {
+                throw new ArgumentNullException("name");
+            }
+            if (name.Length == 0)
+            {
+                throw new ArgumentException(Strings.IndexModel_Exception_NameEmpty);
+            }
+
+            this._name = name;
+            foreach (ColumnSortModel columnSort in columnSorts)
+            {
+                this.ColumnSorts.Add(columnSort);
+            }
+        }
+        #endregion Constructor
+
+        #region IXmlSerializable Members
+        internal const string XmlElement_Tag = "Index";
+        internal const string XmlAttribute_Name = "Name";
+
+        public System.Xml.Schema.XmlSchema GetSchema()
+        {
+            return null;
+        }
+
+        public void ReadXml(System.Xml.XmlReader reader)
+        {
+            // Attributes
+            while (reader.MoveToNextAttribute())
+            {
+                switch (reader.Name)
+                {
+                    case XmlAttribute_Name:
+                        this.Name = reader.Value;
+                        break;
+                }
+            }
+
+            reader.MoveToContent();
+
+            // Element
+            if (!reader.IsEmptyElement)
+            {
+                reader.ReadStartElement();
+                while (reader.NodeType == System.Xml.XmlNodeType.Element)
+                {
+                    switch (reader.Name)
+                    {
+                        case ColumnSortModelCollection.XmlElement_Tag:
+                            this.ColumnSorts.ReadXml(reader);
+                            break;
+                        default:
+                            throw new InvalidOperationException(reader.Name);
+                    }
+                }
+                reader.ReadEndElement();
+            }
+            else
+            {
+                reader.Read();
+            }
+        }
+
+        public void WriteXml(System.Xml.XmlWriter writer)
+        {
+            // Attributes
+            writer.WriteAttributeString(XmlAttribute_Name, this.Name);
+
+            // Elements
+            if (this._columnSorts != null)
+            {
+                writer.WriteStartElement(ColumnSortModelCollection.XmlElement_Tag);
+                this._columnSorts.WriteXml(writer);
+                writer.WriteEndElement();
+            }
+        }
+        #endregion IXmlSerializable Members
+
+    }
+
+    public class IndexModelCollection : Collection<IndexModel>, IXmlSerializable
+    {
+        #region Field & Property
+        private TableModel _table;
+        public TableModel Table
+        {
+            get
+            {
+                return this._table;
+            }
+        }
+        #endregion Field & Property
+
+        #region Constructor
+        public IndexModelCollection(TableModel table)
+        {
+            this._table = table;
+        }
+        #endregion Constructor
+
+        #region Method
+        protected override void InsertItem(int index, IndexModel item)
+        {
+            item.Table = this._table;
+
+            base.InsertItem(index, item);
+        }
+
+        protected override void RemoveItem(int index)
+        {
+            this[index].Table = null;
+
+            base.RemoveItem(index);
+        }
+
+        #region IXmlSerializable Members
+        internal const string XmlElement_Tag = "Indexes";
+
+        public System.Xml.Schema.XmlSchema GetSchema()
+        {
+            return null;
+        }
+
+        public void ReadXml(System.Xml.XmlReader reader)
+        {
+            // Attributes
+            while (reader.MoveToNextAttribute())
+            {
+            }
+
+            reader.MoveToContent();
+
+            // Elements
+            if (!reader.IsEmptyElement)
+            {
+                reader.ReadStartElement();
+                while (reader.NodeType == System.Xml.XmlNodeType.Element)
+                {
+                    switch (reader.Name)
+                    {
+                        case IndexModel.XmlElement_Tag:
+                            IndexModel index = new IndexModel();
+                            index.ReadXml(reader);
+                            this.Add(index);
+                            break;
+                        default:
+                            throw new InvalidOperationException(reader.Name);
+                    }
+                }
+                reader.ReadEndElement();
+            }
+            else
+            {
+                reader.Read();
+            }
+        }
+
+        public void WriteXml(System.Xml.XmlWriter writer)
+        {
+            foreach (IndexModel item in this)
+            {
+                writer.WriteStartElement(IndexModel.XmlElement_Tag);
+                item.WriteXml(writer);
+                writer.WriteEndElement();
+            }
+        }
+        #endregion IXmlSerializable Members
+        #endregion Method
+    }
+
+    public class RelationshipModel : IXmlSerializable
+    {
+        #region Static
+        #endregion Static
+
+        #region Field & Property
+        private DatabaseModel _database;
+        public DatabaseModel Database
+        {
+            get
+            {
+                return this._database;
+            }
+            internal set
+            {
+                this._database = value;
+            }
+        }
+
+        private string _name;
+        public string Name
+        {
+            get
+            {
+                return this._name;
+            }
+            internal set
+            {
+                this._name = value;
+            }
+        }
+
+        private bool _updateCascade;
+        public bool UpdateCascade
+        {
+            get
+            {
+                return this._updateCascade;
+            }
+            set
+            {
+                this._updateCascade = value;
+            }
+        }
+
+        private bool _deleteCascade;
+        public bool DeleteCascade
+        {
+            get
+            {
+                return this._deleteCascade;
+            }
+            set
+            {
+                this._deleteCascade = value;
+            }
+        }
+
+        private EndModel _principalEnd;
+        public EndModel PrincipalEnd
+        {
+            get
+            {
+                return this._principalEnd;
+            }
+            internal set
+            {
+                this._principalEnd = value;
+            }
+        }
+
+        private EndModel _dependentEnd;
+        public EndModel DependentEnd
+        {
+            get
+            {
+                return this._dependentEnd;
+            }
+            internal set
+            {
+                this._dependentEnd = value;
+            }
+        }
+        #endregion Field & Property
+
+        #region Constructor
+        internal RelationshipModel()
+        {
+        }
+
+        public RelationshipModel(EndModel principalEnd, EndModel dependentEnd)
+            : this("FK" + DatabaseHelper.Relation + principalEnd.Table + DatabaseHelper.Relation + dependentEnd.Table, principalEnd, dependentEnd)
+        {
+        }
+
+        public RelationshipModel(string name, EndModel principalEnd, EndModel dependentEnd)
+        {
+            this._name = name;
+            this._principalEnd = principalEnd;
+            this._principalEnd.Relationship = this;
+            this._dependentEnd = dependentEnd;
+            this._dependentEnd.Relationship = this;
+            this.UpdateCascade = true;
+            this.DeleteCascade = true;
+        }
+        #endregion Constructor
+
+        #region IXmlSerializable Members
+        internal const string XmlElement_Tag = "Relationship";
+        internal const string XmlAttribute_Name = "Name";
+        internal const string XmlAttribute_UpdateCascade = "UpdateCascade";
+        internal const string XmlAttribute_DeleteCascade = "DeleteCascade";
+
+        public System.Xml.Schema.XmlSchema GetSchema()
+        {
+            return null;
+        }
+
+        public void ReadXml(System.Xml.XmlReader reader)
+        {
+            // Attributes
+            while (reader.MoveToNextAttribute())
+            {
+                switch (reader.Name)
+                {
+                    case XmlAttribute_Name:
+                        this.Name = reader.Value;
+                        break;
+                    case XmlAttribute_UpdateCascade:
+                        this.UpdateCascade = Convert.ToBoolean(reader.Value);
+                        break;
+                    case XmlAttribute_DeleteCascade:
+                        this.DeleteCascade = Convert.ToBoolean(reader.Value);
+                        break;
+                }
+            }
+
+            reader.MoveToContent();
+
+            // Element
+            if (!reader.IsEmptyElement)
+            {
+                reader.ReadStartElement();
+                while (reader.NodeType == System.Xml.XmlNodeType.Element)
+                {
+                    switch (reader.Name)
+                    {
+                        case EndModel.XmlElement_Principal:
+                            this._principalEnd = new EndModel();
+                            this._principalEnd.ReadXml(reader);
+                            break;
+                        case EndModel.XmlElement_Dependent:
+                            this._dependentEnd = new EndModel();
+                            this._dependentEnd.ReadXml(reader);
+                            break;
+                        default:
+                            throw new InvalidOperationException(reader.Name);
+                    }
+                }
+                reader.ReadEndElement();
+            }
+            else
+            {
+                reader.Read();
+            }
+        }
+
+        public void WriteXml(System.Xml.XmlWriter writer)
+        {
+            // Attributes
+            if (this.Name != default(string))
+            {
+                writer.WriteAttributeString(XmlAttribute_Name, this.Name);
+            }
+            if (this.UpdateCascade != default(bool))
+            {
+                writer.WriteAttributeString(XmlAttribute_UpdateCascade, this.UpdateCascade.ToString());
+            }
+            if (this.DeleteCascade != default(bool))
+            {
+                writer.WriteAttributeString(XmlAttribute_DeleteCascade, this.DeleteCascade.ToString());
+            }
+
+            // Elements
+            if (this._principalEnd != null)
+            {
+                writer.WriteStartElement(EndModel.XmlElement_Principal);
+                this._principalEnd.WriteXml(writer);
+                writer.WriteEndElement();
+            }
+            if (this._dependentEnd != null)
+            {
+                writer.WriteStartElement(EndModel.XmlElement_Dependent);
+                this._dependentEnd.WriteXml(writer);
+                writer.WriteEndElement();
+            }
+        }
+        #endregion IXmlSerializable Members
+    }
+
+    public class RelationshipModelCollection : Collection<RelationshipModel>, IXmlSerializable
+    {
+        #region Field & Property
+        private DatabaseModel _database;
+        public DatabaseModel Database
+        {
+            get
+            {
+                return this._database;
+            }
+        }
+
+        public RelationshipModel this[string name]
+        {
+            get
+            {
+                if (name == null)
+                {
+                    throw new ArgumentNullException("name");
+                }
+
+                foreach (RelationshipModel model in this)
+                {
+                    if (name.Equals(model.Name, StringComparison.Ordinal))
+                    {
+                        return model;
+                    }
+                }
+
+                return null;
+            }
+        }
+        #endregion Field & Property
+
+        #region Constructor
+        public RelationshipModelCollection(DatabaseModel database)
+        {
+            this._database = database;
+        }
+        #endregion Constructor
+
+        #region Method
+        public RelationshipModel Find(TableModel table1, TableModel table2)
+        {
+            if (table1 == null)
+            {
+                throw new ArgumentNullException("table1");
+            }
+            if (table2 == null)
+            {
+                throw new ArgumentNullException("table2");
+            }
+
+            return this.Find(table1.Name, table2.Name);
+        }
+
+        public RelationshipModel Find(string table1, string table2)
+        {
+            if (table1 == null)
+            {
+                throw new ArgumentNullException("table1");
+            }
+            if (table2 == null)
+            {
+                throw new ArgumentNullException("table2");
+            }
+
+            foreach (RelationshipModel relationship in this)
+            {
+                if ((relationship.PrincipalEnd.Table.Equals(table1, StringComparison.OrdinalIgnoreCase) && relationship.DependentEnd.Table.Equals(table2, StringComparison.OrdinalIgnoreCase))
+                    || (relationship.PrincipalEnd.Table.Equals(table2, StringComparison.OrdinalIgnoreCase) && relationship.DependentEnd.Table.Equals(table1, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return relationship;
+                }
+            }
+
+            return null;
+        }
+
+        protected override void InsertItem(int index, RelationshipModel item)
+        {
+            item.Database = this._database;
+
+            base.InsertItem(index, item);
+        }
+
+        protected override void RemoveItem(int index)
+        {
+            this[index].Database = null;
+
+            base.RemoveItem(index);
+        }
+
+        #region IXmlSerializable Members
+        internal const string XmlElement_Tag = "Relationships";
+
+        public System.Xml.Schema.XmlSchema GetSchema()
+        {
+            return null;
+        }
+
+        public void ReadXml(System.Xml.XmlReader reader)
+        {
+            // Attributes
+            while (reader.MoveToNextAttribute())
+            {
+            }
+
+            reader.MoveToContent();
+
+            // Elements
+            if (!reader.IsEmptyElement)
+            {
+                reader.ReadStartElement();
+                while (reader.NodeType == System.Xml.XmlNodeType.Element)
+                {
+                    switch (reader.Name)
+                    {
+                        case RelationshipModel.XmlElement_Tag:
+                            RelationshipModel relationship = new RelationshipModel();
+                            relationship.ReadXml(reader);
+                            this.Add(relationship);
+                            break;
+                        default:
+                            throw new InvalidOperationException(reader.Name);
+                    }
+                }
+                reader.ReadEndElement();
+            }
+            else
+            {
+                reader.Read();
+            }
+        }
+
+        public void WriteXml(System.Xml.XmlWriter writer)
+        {
+            foreach (RelationshipModel item in this)
+            {
+                writer.WriteStartElement(RelationshipModel.XmlElement_Tag);
+                item.WriteXml(writer);
+                writer.WriteEndElement();
+            }
+        }
+        #endregion IXmlSerializable Members
+        #endregion Method
+    }
+
+    public class TableModel : IXmlSerializable
+    {
+        #region Static
+        public const string DefaultSchemaName = "dbo";
+        #endregion Static
+
+        #region Field & Property
+        private DatabaseModel _database;
+        public DatabaseModel Database
+        {
+            get
+            {
+                return this._database;
+            }
+            internal set
+            {
+                this._database = value;
+            }
+        }
+
+        private string _schema;
+        public string Schema
+        {
+            get
+            {
+                return this._schema;
+            }
+            set
+            {
+                this._schema = value;
+            }
+        }
+
+        private string _name;
+        public string Name
+        {
+            get
+            {
+                return this._name;
+            }
+            internal set
+            {
+                this._name = value;
+            }
+        }
+
+        private string _description;
+        public string Description
+        {
+            get
+            {
+                return this._description;
+            }
+            internal set
+            {
+                this._description = value;
+            }
+        }
+
+        private ColumnModelCollection _columns;
+        public ColumnModelCollection Columns
+        {
+            get
+            {
+                if (this._columns == null)
+                {
+                    this._columns = new ColumnModelCollection(this);
+                }
+
+                return this._columns;
+            }
+        }
+
+        private IdentityModel _identity;
+        public IdentityModel Identity
+        {
+            get
+            {
+                return this._identity;
+            }
+            set
+            {
+                this._identity = value;
+            }
+        }
+
+        private ConstraintModelCollection _constraints;
+        public ConstraintModelCollection Constraints
+        {
+            get
+            {
+                if (this._constraints == null)
+                {
+                    this._constraints = new ConstraintModelCollection(this);
+                }
+
+                return this._constraints;
+            }
+        }
+
+        private IndexModelCollection _indexes;
+        public IndexModelCollection Indexes
+        {
+            get
+            {
+                if (this._indexes == null)
+                {
+                    this._indexes = new IndexModelCollection(this);
+                }
+
+                return this._indexes;
+            }
+        }
+        #endregion Field & Property
+
+        #region Constructor
+        internal TableModel()
+        {
+        }
+
+        public TableModel(string name)
+            : this(DefaultSchemaName, name)
+        {            
+        }
+
+        public TableModel(string schema, string name)
+        {
+            if (schema == null)
+            {
+                throw new ArgumentNullException("schema");
+            }
+            if (schema.Length == 0)
+            {
+                throw new ArgumentException(Strings.TableModel_Exception_SchemaEmpty);
+            }
+            if (name == null)
+            {
+                throw new ArgumentNullException("name");
+            }
+            if (name.Length == 0)
+            {
+                throw new ArgumentException(Strings.TableModel_Exception_NameEmpty);
+            }
+
+            this._name = name;
+        }
+        #endregion Constructor
+
+        #region Method
+        public string[] GetPrimaryKeys()
+        {
+            foreach (ConstraintModel constraint in this.Constraints)
+            {
+                PrimaryKeyConstraintModel primaryKeyConstraint = constraint as PrimaryKeyConstraintModel;
+                if (primaryKeyConstraint != null)
+                {
+                    return primaryKeyConstraint.Columns;
+                }
+            }
+
+            return null;
+        }
+
+        #region IXmlSerializable Members
+        internal const string XmlElement_Tag = "Table";
+        internal const string XmlAttribute_Schema = "Schema";
+        internal const string XmlAttribute_Name = "Name";
+
+        public System.Xml.Schema.XmlSchema GetSchema()
+        {
+            return null;
+        }
+
+        public void ReadXml(System.Xml.XmlReader reader)
+        {
+            // Attributes
+            while (reader.MoveToNextAttribute())
+            {
+                switch (reader.Name)
+                {
+                    case XmlAttribute_Schema:
+                        this._schema = reader.Value;
+                        break;
+                    case XmlAttribute_Name:
+                        this._name = reader.Value;
+                        break;
+                }
+            }
+
+            reader.MoveToContent();
+
+            // Element
+            if (!reader.IsEmptyElement)
+            {
+                reader.ReadStartElement();
+                while (reader.NodeType == System.Xml.XmlNodeType.Element)
+                {
+                    switch (reader.Name)
+                    {
+                        case ColumnModelCollection.XmlElement_Tag:
+                            this.Columns.ReadXml(reader);
+                            break;
+                        case ConstraintModelCollection.XmlElement_Tag:
+                            this.Constraints.ReadXml(reader);
+                            break;
+                        case IndexModelCollection.XmlElement_Tag:
+                            this.Indexes.ReadXml(reader);
+                            break;
+                        default:
+                            throw new InvalidOperationException(reader.Name);
+                    }
+                }
+                reader.ReadEndElement();
+            }
+            else
+            {
+                reader.Read();
+            }
+        }
+
+        public void WriteXml(System.Xml.XmlWriter writer)
+        {
+            // Attributes
+            if (this._schema != default(string))
+            {
+                writer.WriteAttributeString(XmlAttribute_Schema, this._schema);
+            }
+            if (this._name != default(string))
+            {
+                writer.WriteAttributeString(XmlAttribute_Name, this._name);
+            }
+
+            // Columns
+            if (this._columns != null)
+            {
+                writer.WriteStartElement(ColumnModelCollection.XmlElement_Tag);
+                this._columns.WriteXml(writer);
+                writer.WriteEndElement();
+            }
+            // Identity
+            if (this._identity != null)
+            {
+                writer.WriteStartElement(IdentityModel.XmlElement_Tag);
+                this._identity.WriteXml(writer);
+                writer.WriteEndElement();
+            }
+            // Constraint
+            if (this._constraints != null)
+            {
+                writer.WriteStartElement(ConstraintModelCollection.XmlElement_Tag);
+                this._constraints.WriteXml(writer);
+                writer.WriteEndElement();
+            }
+            // Indexes
+            if (this._indexes != null)
+            {
+                writer.WriteStartElement(IndexModelCollection.XmlElement_Tag);
+                this._indexes.WriteXml(writer);
+                writer.WriteEndElement();
+            }
+        }
+        #endregion IXmlSerializable Members
+
+        public override string ToString()
+        {
+            return string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}.{1}", this._schema, this._name);
+        }
+        #endregion Method
+    }
+
+    public class TableModelCollection : Collection<TableModel>, IXmlSerializable
+    {
+        #region Field & Property
+        private DatabaseModel _database;
+        public DatabaseModel Database
+        {
+            get
+            {
+                return this._database;
+            }
+        }
+
+        public TableModel this[string name]
+        {
+            get
+            {
+                return this[TableModel.DefaultSchemaName, name];
+            }
+        }
+
+        public TableModel this[string schema, string name]
+        {
+            get
+            {
+                if (schema == null)
+                {
+                    throw new ArgumentNullException("schema");
+                }
+                if (name == null)
+                {
+                    throw new ArgumentNullException("name");
+                }
+
+                foreach (TableModel model in this)
+                {
+                    if (schema.Equals(model.Schema, StringComparison.OrdinalIgnoreCase)
+                        && name.Equals(model.Name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return model;
+                    }
+                }
+
+                return null;
+            }
+        }
+        #endregion Field & Property
+
+        #region Constructor
+        public TableModelCollection(DatabaseModel database)
+        {
+            this._database = database;
+        }
+        #endregion Constructor
+
+        #region Method
+        protected override void InsertItem(int index, TableModel item)
+        {
+            if (this[item.Schema, item.Name] != null)
+            {
+                throw new InvalidOperationException(Strings.TableModelCollection_Exception_NameExists);
+            }
+            item.Database = this._database;
+
+            base.InsertItem(index, item);
+        }
+
+        protected override void RemoveItem(int index)
+        {
+            this[index].Database = null;
+
+            base.RemoveItem(index);
+        }
+
+        #region IXmlSerializable Members
+        internal const string XmlElement_Tag = "Tables";
+
+        public System.Xml.Schema.XmlSchema GetSchema()
+        {
+            return null;
+        }
+
+        public void ReadXml(System.Xml.XmlReader reader)
+        {
+            // Attributes
+            while (reader.MoveToNextAttribute())
+            {
+            }
+
+            reader.MoveToContent();
+
+            // Elements
+            if (!reader.IsEmptyElement)
+            {
+                // Read first element
+                reader.ReadStartElement();
+                while (reader.NodeType == System.Xml.XmlNodeType.Element)
+                {
+                    switch (reader.Name)
+                    {
+                        case TableModel.XmlElement_Tag:
+                            TableModel table = new TableModel();
+                            table.ReadXml(reader);
+                            this.Add(table);
+                            break;
+                        default:
+                            throw new InvalidOperationException(reader.Name);
+                    }
+                }
+                reader.ReadEndElement();
+            }
+            else
+            {
+                reader.Read();
+            }
+        }
+
+        public void WriteXml(System.Xml.XmlWriter writer)
+        {
+            foreach (TableModel item in this)
+            {
+                writer.WriteStartElement(TableModel.XmlElement_Tag);
+                (item as IXmlSerializable).WriteXml(writer);
+                writer.WriteEndElement();
+            }
+        }
+        #endregion IXmlSerializable Members
+        #endregion Method
+
+    }
+
+#>
+
+
+<#+
+    /// <summary>
+    /// Responsible for marking the various sections of the generation,
+    /// so they can be split up into separate files
+    /// </summary>
+    public class FileManager
+    {
+        /// <summary>
+        /// Creates the VsFileManager if VS is detected, otherwise
+        /// creates the file system version.
+        /// </summary>
+        public static FileManager Create(object textTransformation)
+        {
+            DynamicTextTransformation transformation = DynamicTextTransformation.Create(textTransformation);
+            IDynamicHost host = transformation.Host;
+
+            #if !PREPROCESSED_TEMPLATE
+            var hostServiceProvider = host.AsIServiceProvider();
+
+            if (hostServiceProvider != null)
+            {
+                EnvDTE.DTE dte = (EnvDTE.DTE) hostServiceProvider.GetService(typeof(EnvDTE.DTE));
+
+                if (dte != null)
+                {
+                    return new VsFileManager(transformation);
+                }
+            }
+            #endif
+            return new FileManager(transformation);
+        }
+
+        private sealed class Block
+        {
+            public String Name;
+            public int Start, Length;
+        }
+
+        private readonly List<Block> files = new List<Block>();
+        private readonly Block footer = new Block();
+        private readonly Block header = new Block();
+        private readonly DynamicTextTransformation _textTransformation;
+
+        // reference to the GenerationEnvironment StringBuilder on the
+        // TextTransformation object
+        private readonly StringBuilder _generationEnvironment;
+
+        private Block currentBlock;
+
+        /// <summary>
+        /// Initializes an FileManager Instance  with the
+        /// TextTransformation (T4 generated class) that is currently running
+        /// </summary>
+        private FileManager(object textTransformation)
+        {
+            if (textTransformation == null)
+            {
+                throw new ArgumentNullException("textTransformation");
+            }
+
+            _textTransformation = DynamicTextTransformation.Create(textTransformation);
+            _generationEnvironment = _textTransformation.GenerationEnvironment;
+        }
+
+        /// <summary>
+        /// Marks the end of the last file if there was one, and starts a new
+        /// and marks this point in generation as a new file.
+        /// </summary>
+        public void StartNewFile(string name)
+        {
+            if (name == null)
+            {
+                throw new ArgumentNullException("name");
+            }
+
+            CurrentBlock = new Block { Name = name };
+        }
+
+        public void StartFooter()
+        {
+            CurrentBlock = footer;
+        }
+
+        public void StartHeader()
+        {
+            CurrentBlock = header;
+        }
+
+        public void EndBlock()
+        {
+            if (CurrentBlock == null)
+            {
+                return;
+            }
+
+            CurrentBlock.Length = _generationEnvironment.Length - CurrentBlock.Start;
+
+            if (CurrentBlock != header && CurrentBlock != footer)
+            {
+                files.Add(CurrentBlock);
+            }
+
+            currentBlock = null;
+        }
+
+        /// <summary>
+        /// Produce the template output files.
+        /// </summary>
+        public virtual IEnumerable<string> Process(bool split)
+        {
+            var generatedFileNames = new List<string>();
+
+            if (split)
+            {
+                EndBlock();
+
+                var headerText = _generationEnvironment.ToString(header.Start, header.Length);
+                var footerText = _generationEnvironment.ToString(footer.Start, footer.Length);
+                var outputPath = Path.GetDirectoryName(_textTransformation.Host.TemplateFile);
+
+                files.Reverse();
+
+                foreach (var block in files)
+                {
+                    var fileName = Path.Combine(outputPath, block.Name);
+                    var content = headerText + _generationEnvironment.ToString(block.Start, block.Length) + footerText;
+
+                    generatedFileNames.Add(fileName);
+                    CreateFile(fileName, content);
+                    _generationEnvironment.Remove(block.Start, block.Length);
+                }
+            }
+
+            return generatedFileNames;
+        }
+
+        protected virtual void CreateFile(string fileName, string content)
+        {
+            if (IsFileContentDifferent(fileName, content))
+            {
+                File.WriteAllText(fileName, content);
+            }
+        }
+
+        protected bool IsFileContentDifferent(String fileName, string newContent)
+        {
+            return !(File.Exists(fileName) && File.ReadAllText(fileName) == newContent);
+        }
+
+        private Block CurrentBlock
+        {
+            get { return currentBlock; }
+            set
+            {
+                if (CurrentBlock != null)
+                {
+                    EndBlock();
+                }
+
+                if (value != null)
+                {
+                    value.Start = _generationEnvironment.Length;
+                }
+
+                currentBlock = value;
+            }
+        }
+
+        #if !PREPROCESSED_TEMPLATE
+        private sealed class VsFileManager : FileManager
+        {
+            private EnvDTE.ProjectItem templateProjectItem;
+            private EnvDTE.DTE dte;
+            private Action<string> checkOutAction;
+            private Action<IEnumerable<string>> projectSyncAction;
+
+            /// <summary>
+            /// Creates an instance of the VsFileManager class with the IDynamicHost instance
+            /// </summary>
+            public VsFileManager(object textTemplating)
+                : base(textTemplating)
+            {
+                var hostServiceProvider = _textTransformation.Host.AsIServiceProvider();
+                if (hostServiceProvider == null)
+                {
+                    throw new ArgumentNullException("Could not obtain hostServiceProvider");
+                }
+
+                dte = (EnvDTE.DTE) hostServiceProvider.GetService(typeof(EnvDTE.DTE));
+                if (dte == null)
+                {
+                    throw new ArgumentNullException("Could not obtain DTE from host");
+                }
+
+                templateProjectItem = dte.Solution.FindProjectItem(_textTransformation.Host.TemplateFile);
+
+                checkOutAction = fileName => dte.SourceControl.CheckOutItem(fileName);
+                projectSyncAction = keepFileNames => ProjectSync(templateProjectItem, keepFileNames);
+            }
+
+            public override IEnumerable<string> Process(bool split)
+            {
+                if (templateProjectItem.ProjectItems == null)
+                {
+                    return new List<string>();
+                }
+
+                var generatedFileNames = base.Process(split);
+
+                projectSyncAction.EndInvoke(projectSyncAction.BeginInvoke(generatedFileNames, null, null));
+
+                return generatedFileNames;
+            }
+
+            protected override void CreateFile(string fileName, string content)
+            {
+                if (IsFileContentDifferent(fileName, content))
+                {
+                    CheckoutFileIfRequired(fileName);
+                    File.WriteAllText(fileName, content);
+                }
+            }
+
+            private static void ProjectSync(EnvDTE.ProjectItem templateProjectItem, IEnumerable<string> keepFileNames)
+            {
+                var keepFileNameSet = new HashSet<string>(keepFileNames);
+                var projectFiles = new Dictionary<string, EnvDTE.ProjectItem>();
+                var originalOutput = Path.GetFileNameWithoutExtension(templateProjectItem.FileNames[0]);
+
+                foreach (EnvDTE.ProjectItem projectItem in templateProjectItem.ProjectItems)
+                {
+                    projectFiles.Add(projectItem.FileNames[0], projectItem);
+                }
+
+                // Remove unused items from the project
+                foreach (var pair in projectFiles)
+                {
+                    if (!keepFileNames.Contains(pair.Key)
+                        && !(Path.GetFileNameWithoutExtension(pair.Key) + ".").StartsWith(originalOutput + "."))
+                    {
+                        pair.Value.Delete();
+                    }
+                }
+
+                // Add missing files to the project
+                foreach (string fileName in keepFileNameSet)
+                {
+                    if (!projectFiles.ContainsKey(fileName))
+                    {
+                        templateProjectItem.ProjectItems.AddFromFile(fileName);
+                    }
+                }
+            }
+
+            private void CheckoutFileIfRequired(string fileName)
+            {
+                if (dte.SourceControl == null
+                    || !dte.SourceControl.IsItemUnderSCC(fileName)
+                    || dte.SourceControl.IsItemCheckedOut(fileName))
+                {
+                    return;
+                }
+
+                // run on worker thread to prevent T4 calling back into VS
+                checkOutAction.EndInvoke(checkOutAction.BeginInvoke(fileName, null, null));
+            }
+        }
+        #endif
+    }
+
+    /// <summary>
+    /// Responsible creating an instance that can be passed
+    /// to helper classes that need to access the TextTransformation
+    /// members.  It accesses member by name and signature rather than
+    /// by type.  This is necessary when the
+    /// template is being used in Preprocessed mode
+    /// and there is no common known type that can be
+    /// passed instead
+    /// </summary>
+    public class DynamicTextTransformation
+    {
+        private object _instance;
+        IDynamicHost _dynamicHost;
+
+        private readonly MethodInfo _write;
+        private readonly MethodInfo _writeLine;
+        private readonly PropertyInfo _generationEnvironment;
+        private readonly PropertyInfo _errors;
+        private readonly PropertyInfo _host;
+
+        /// <summary>
+        /// Creates an instance of the DynamicTextTransformation class around the passed in
+        /// TextTransformation shapped instance passed in, or if the passed in instance
+        /// already is a DynamicTextTransformation, it casts it and sends it back.
+        /// </summary>
+        public static DynamicTextTransformation Create(object instance)
+        {
+            if (instance == null)
+            {
+                throw new ArgumentNullException("instance");
+            }
+
+            DynamicTextTransformation textTransformation = instance as DynamicTextTransformation;
+            if (textTransformation != null)
+            {
+                return textTransformation;
+            }
+
+            return new DynamicTextTransformation(instance);
+        }
+
+        private DynamicTextTransformation(object instance)
+        {
+            _instance = instance;
+            Type type = _instance.GetType();
+            _write = type.GetMethod("Write", new Type[] { typeof(string) });
+            _writeLine = type.GetMethod("WriteLine", new Type[] { typeof(string) });
+            _generationEnvironment = type.GetProperty("GenerationEnvironment", BindingFlags.Instance | BindingFlags.NonPublic);
+            _host = type.GetProperty("Host");
+            _errors = type.GetProperty("Errors");
+        }
+
+        /// <summary>
+        /// Gets the value of the wrapped TextTranformation instance's GenerationEnvironment property
+        /// </summary>
+        public StringBuilder GenerationEnvironment { get { return (StringBuilder)_generationEnvironment.GetValue(_instance, null); } }
+
+        /// <summary>
+        /// Gets the value of the wrapped TextTranformation instance's Errors property
+        /// </summary>
+        public System.CodeDom.Compiler.CompilerErrorCollection Errors { get { return (System.CodeDom.Compiler.CompilerErrorCollection)_errors.GetValue(_instance, null); } }
+
+        /// <summary>
+        /// Calls the wrapped TextTranformation instance's Write method.
+        /// </summary>
+        public void Write(string text)
+        {
+            _write.Invoke(_instance, new object[] { text });
+        }
+
+        /// <summary>
+        /// Calls the wrapped TextTranformation instance's WriteLine method.
+        /// </summary>
+        public void WriteLine(string text)
+        {
+            _writeLine.Invoke(_instance, new object[] { text });
+        }
+
+        /// <summary>
+        /// Gets the value of the wrapped TextTranformation instance's Host property
+        /// if available (shows up when hostspecific is set to true in the template directive) and returns
+        /// the appropriate implementation of IDynamicHost
+        /// </summary>
+        public IDynamicHost Host
+        {
+            get
+            {
+                if (_dynamicHost == null)
+                {
+                    if(_host == null)
+                    {
+                        _dynamicHost = new NullHost();
+                    }
+                    else
+                    {
+                        _dynamicHost = new DynamicHost(_host.GetValue(_instance, null));
+                    }
+                }
+                return _dynamicHost;
+            }
+        }
+    }
+
+
+    /// <summary>
+    /// Reponsible for abstracting the use of Host between times
+    /// when it is available and not
+    /// </summary>
+    public interface IDynamicHost
+    {
+        /// <summary>
+        /// An abstracted call to Microsoft.VisualStudio.TextTemplating.ITextTemplatingEngineHost ResolveParameterValue
+        /// </summary>
+        string ResolveParameterValue(string id, string name, string otherName);
+
+        /// <summary>
+        /// An abstracted call to Microsoft.VisualStudio.TextTemplating.ITextTemplatingEngineHost ResolvePath
+        /// </summary>
+        string ResolvePath(string path);
+
+        /// <summary>
+        /// An abstracted call to Microsoft.VisualStudio.TextTemplating.ITextTemplatingEngineHost TemplateFile
+        /// </summary>
+        string TemplateFile { get; }
+
+        /// <summary>
+        /// Returns the Host instance cast as an IServiceProvider
+        /// </summary>
+        IServiceProvider AsIServiceProvider();
+    }
+
+    /// <summary>
+    /// Reponsible for implementing the IDynamicHost as a dynamic
+    /// shape wrapper over the Microsoft.VisualStudio.TextTemplating.ITextTemplatingEngineHost interface
+    /// rather than type dependent wrapper.  We don't use the
+    /// interface type so that the code can be run in preprocessed mode
+    /// on a .net framework only installed machine.
+    /// </summary>
+    public class DynamicHost : IDynamicHost
+    {
+        private readonly object _instance;
+        private readonly MethodInfo _resolveParameterValue;
+        private readonly MethodInfo _resolvePath;
+        private readonly PropertyInfo _templateFile;
+
+        /// <summary>
+        /// Creates an instance of the DynamicHost class around the passed in
+        /// Microsoft.VisualStudio.TextTemplating.ITextTemplatingEngineHost shapped instance passed in.
+        /// </summary>
+        public DynamicHost(object instance)
+        {
+            _instance = instance;
+            Type type = _instance.GetType();
+            _resolveParameterValue = type.GetMethod("ResolveParameterValue", new Type[] { typeof(string), typeof(string), typeof(string) });
+            _resolvePath = type.GetMethod("ResolvePath", new Type[] { typeof(string) });
+            _templateFile = type.GetProperty("TemplateFile");
+
+        }
+
+        /// <summary>
+        /// A call to Microsoft.VisualStudio.TextTemplating.ITextTemplatingEngineHost ResolveParameterValue
+        /// </summary>
+        public string ResolveParameterValue(string id, string name, string otherName)
+        {
+            return (string)_resolveParameterValue.Invoke(_instance, new object[] { id, name, otherName });
+        }
+
+        /// <summary>
+        /// A call to Microsoft.VisualStudio.TextTemplating.ITextTemplatingEngineHost ResolvePath
+        /// </summary>
+        public string ResolvePath(string path)
+        {
+            return (string)_resolvePath.Invoke(_instance, new object[] { path });
+        }
+
+        /// <summary>
+        /// A call to Microsoft.VisualStudio.TextTemplating.ITextTemplatingEngineHost TemplateFile
+        /// </summary>
+        public string TemplateFile
+        {
+            get
+            {
+                return (string)_templateFile.GetValue(_instance, null);
+            }
+        }
+
+        /// <summary>
+        /// Returns the Host instance cast as an IServiceProvider
+        /// </summary>
+        public IServiceProvider AsIServiceProvider()
+        {
+            return _instance as IServiceProvider;
+        }
+    }
+
+    /// <summary>
+    /// Reponsible for implementing the IDynamicHost when the
+    /// Host property is not available on the TextTemplating type. The Host
+    /// property only exists when the hostspecific attribute of the template
+    /// directive is set to true.
+    /// </summary>
+    public class NullHost : IDynamicHost
+    {
+        /// <summary>
+        /// An abstraction of the call to Microsoft.VisualStudio.TextTemplating.ITextTemplatingEngineHost ResolveParameterValue
+        /// that simply retuns null.
+        /// </summary>
+        public string ResolveParameterValue(string id, string name, string otherName)
+        {
+            return null;
+        }
+
+        /// <summary>
+        /// An abstraction of the call to Microsoft.VisualStudio.TextTemplating.ITextTemplatingEngineHost ResolvePath
+        /// that simply retuns the path passed in.
+        /// </summary>
+        public string ResolvePath(string path)
+        {
+            return path;
+        }
+
+        /// <summary>
+        /// An abstraction of the call to Microsoft.VisualStudio.TextTemplating.ITextTemplatingEngineHost TemplateFile
+        /// that returns null.
+        /// </summary>
+        public string TemplateFile
+        {
+            get
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Returns null.
+        /// </summary>
+        public IServiceProvider AsIServiceProvider()
+        {
+            return null;
+        }
+    }
+
+
+#>

@@ -1,0 +1,367 @@
+﻿<#@ template debug="false" hostspecific="True" language="C#" #>
+<#@ assembly name="System.Data" #>
+<#@ assembly name="System.xml" #>
+<#@ assembly name="System.Core" #>
+<#@ assembly name="EnvDTE" #>
+<#@ assembly name="Microsoft.VisualStudio.OLE.Interop" #>
+<#@ assembly name="Microsoft.VisualStudio.Shell" #>
+<#@ assembly name="Microsoft.VisualStudio.Shell.Interop" #>
+<#@ assembly name="Microsoft.VisualStudio.Shell.Interop.8.0" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ import namespace="System.Data.SqlClient" #>
+<#@ import namespace="System.Data" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ import namespace="System.Diagnostics" #>
+<#@ import namespace="System.IO" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Xml" #>
+<#@ import namespace="Microsoft.VisualStudio.Shell" #>
+<#@ import namespace="Microsoft.VisualStudio.Shell.Interop" #>
+<#@ import namespace="Microsoft.VisualStudio.TextTemplating" #>
+<#@ output extension=".cs" #>
+// =================================================================
+//
+// =================================================================
+<# 
+	List<string> tableNameList = SqlHelper.GetTableNameList();
+    foreach (var tableName in tableNameList)
+    {
+#>
+
+using System;
+using Abp.Domain.Entities;
+using System.ComponentModel.DataAnnotations.Schema;
+namespace MicroService.EntityFramework
+{
+    /// <summary>
+    /// Test Default DataBase
+    /// </summary>
+    [Table("<#= tableName #>")]
+    public class <#= tableName #> : Entity
+    {
+<#
+		DataTable dt =  SqlHelper.GetColumnsByTableName(tableName);
+        foreach (DataRow rowItem in dt.Rows)
+        {
+			var zdm = rowItem["字段名"].ToString();
+            if (zdm.ToLower() != "id")
+            {
+#>
+        /// <summary>
+        /// <#= rowItem["说明"]#>
+        /// </summary>
+	    <#= "public "+SqlHelper.GetFieldType(rowItem["类型"].ToString(),rowItem["允许空"].ToString())+" " + zdm + "{ get; set; }" #>
+<#
+        }
+    }
+#>
+    }
+}
+<# SaveOutput(tableName+".cs"); #>
+<# 
+}
+#>
+namespace MicroService.EntityFramework
+{
+    using System.Data.Common;
+    using Abp.EntityFramework;
+    using System.Data.Entity;
+
+    public partial class MicroServiceDbContext
+    {
+<#
+    foreach (var item in tableNameList)
+    {
+#>
+       <#=" public virtual IDbSet<"+item+"> "+item+" { get; set; } "#>
+<#    
+    }         
+#>
+    }
+}
+<#    SaveOutput("MicroServiceDbContext.DbSet.cs"); #>
+<#+
+    List<string> __savedOutputs = new List<string>();
+    Engine __engine = new Engine();
+    void DeleteOldOutputs()
+    {
+        EnvDTE.ProjectItem templateProjectItem = __getTemplateProjectItem();
+        foreach (EnvDTE.ProjectItem childProjectItem in templateProjectItem.ProjectItems)
+        {
+            if (!__savedOutputs.Contains(childProjectItem.Name))
+                childProjectItem.Delete();
+        }
+    }
+    void ProcessTemplate(string templateFileName, string outputFileName)
+    {
+        string templateDirectory = Path.GetDirectoryName(Host.TemplateFile);
+        string outputFilePath = Path.Combine(templateDirectory, outputFileName);
+
+        string template = File.ReadAllText(Host.ResolvePath(templateFileName));
+        string output = __engine.ProcessTemplate(template, Host);
+        File.WriteAllText(outputFilePath, output);
+
+        EnvDTE.ProjectItem templateProjectItem = __getTemplateProjectItem();
+        templateProjectItem.ProjectItems.AddFromFile(outputFilePath);
+
+        __savedOutputs.Add(outputFileName);
+    }
+    void SaveOutput(string outputFileName)
+    {
+        string templateDirectory = Path.GetDirectoryName(Host.TemplateFile);
+        string outputFilePath = Path.Combine(templateDirectory, outputFileName);
+
+        File.WriteAllText(outputFilePath, this.GenerationEnvironment.ToString());
+        this.GenerationEnvironment = new StringBuilder();
+
+        EnvDTE.ProjectItem templateProjectItem = __getTemplateProjectItem();
+        templateProjectItem.ProjectItems.AddFromFile(outputFilePath);
+
+        __savedOutputs.Add(outputFileName);
+    }
+
+    EnvDTE.ProjectItem __getTemplateProjectItem()
+    {
+        EnvDTE.Project dteProject = __getTemplateProject();
+
+        IVsProject vsProject = __dteProjectToVsProject(dteProject);
+
+        int iFound = 0;
+        uint itemId = 0;
+        VSDOCUMENTPRIORITY[] pdwPriority = new VSDOCUMENTPRIORITY[1];
+        int result = vsProject.IsDocumentInProject(Host.TemplateFile, out iFound, pdwPriority, out itemId);
+        if (result != VSConstants.S_OK)
+            throw new Exception("Unexpected error calling IVsProject.IsDocumentInProject");
+        if (iFound == 0)
+            throw new Exception("Cannot retrieve ProjectItem for template file");
+        if (itemId == 0)
+            throw new Exception("Cannot retrieve ProjectItem for template file");
+
+        Microsoft.VisualStudio.OLE.Interop.IServiceProvider itemContext = null;
+        result = vsProject.GetItemContext(itemId, out itemContext);
+        if (result != VSConstants.S_OK)
+            throw new Exception("Unexpected error calling IVsProject.GetItemContext");
+        if (itemContext == null)
+            throw new Exception("IVsProject.GetItemContext returned null");
+    
+        ServiceProvider itemContextService = new ServiceProvider(itemContext);
+        EnvDTE.ProjectItem templateItem = (EnvDTE.ProjectItem)itemContextService.GetService(typeof(EnvDTE.ProjectItem));
+        Debug.Assert(templateItem != null, "itemContextService.GetService returned null");
+
+        return templateItem;
+    }
+
+    EnvDTE.Project __getTemplateProject()
+    {
+        IServiceProvider hostServiceProvider = (IServiceProvider)Host;
+        if (hostServiceProvider == null)
+            throw new Exception("Host property returned unexpected value (null)");
+
+        EnvDTE.DTE dte = (EnvDTE.DTE)hostServiceProvider.GetService(typeof(EnvDTE.DTE));
+        if (dte == null)
+            throw new Exception("Unable to retrieve EnvDTE.DTE");
+
+        Array activeSolutionProjects = (Array)dte.ActiveSolutionProjects;
+        if (activeSolutionProjects == null)
+            throw new Exception("DTE.ActiveSolutionProjects returned null");
+
+        EnvDTE.Project dteProject = (EnvDTE.Project)activeSolutionProjects.GetValue(0);
+        if (dteProject == null)
+            throw new Exception("DTE.ActiveSolutionProjects[0] returned null");
+
+        return dteProject;
+    }
+
+    static IVsProject __dteProjectToVsProject(EnvDTE.Project project)
+    {
+        if (project == null) 
+            throw new ArgumentNullException("project");
+            
+        string projectGuid = null;        
+
+        // DTE does not expose the project GUID that exists at in the msbuild project file.        
+        // Cannot use MSBuild object model because it uses a static instance of the Engine,         
+        // and using the Project will cause it to be unloaded from the engine when the         
+        // GC collects the variable that we declare.       
+        using (XmlReader projectReader = XmlReader.Create(project.FileName))
+        {
+            projectReader.MoveToContent();
+            object nodeName = projectReader.NameTable.Add("ProjectGuid");
+            while (projectReader.Read())
+            {
+                if (Object.Equals(projectReader.LocalName, nodeName))
+                {
+                    projectGuid = (string)projectReader.ReadElementContentAsString(); 
+                    break;
+                }
+            }
+        }
+        if (string.IsNullOrEmpty(projectGuid))
+            throw new Exception("Unable to find ProjectGuid element in the project file");
+
+        Microsoft.VisualStudio.OLE.Interop.IServiceProvider dteServiceProvider = 
+            (Microsoft.VisualStudio.OLE.Interop.IServiceProvider)project.DTE;
+        IServiceProvider serviceProvider = new ServiceProvider(dteServiceProvider); 
+        IVsHierarchy vsHierarchy = VsShellUtilities.GetHierarchy(serviceProvider, new Guid(projectGuid));
+            
+        IVsProject vsProject = (IVsProject)vsHierarchy;
+        if (vsProject == null)
+            throw new ArgumentException("Project is not a VS project.");
+        return vsProject;
+    }
+    public class SqlHelper
+    {
+        public const string connectionString = "data source=.;initial catalog=Wnis_Demo;user id=sa;password=Pass@word1;";
+        public static SqlConnection conn = new SqlConnection(connectionString);
+        public static List<string> GetTableNameList()
+        {
+            List<string> tableNameList = new List<string>();
+            conn.Open();
+            System.Data.DataTable schema = conn.GetSchema("Tables");   //Views
+            foreach(System.Data.DataRow row in schema.Rows)
+            {    
+                string tb_name= row["TABLE_NAME"].ToString();
+                tableNameList.Add(tb_name);
+            }
+            conn.Close();  
+
+            return tableNameList;
+        }
+
+        public static DataTable GetColumnsByTableName(string tableName)
+        {
+            string selectQuery =
+                @"
+                SELECT (case when a.colorder=1 then d.name else null end) 表名, a.colorder 字段序号,a.name 字段名,
+                (case when COLUMNPROPERTY( a.id,a.name,'IsIdentity')=1 then '√'else '' end) 标识, 
+                (case when (SELECT count(*) FROM sysobjects  WHERE (name in (
+                SELECT name FROM sysindexes  WHERE (id = a.id) AND (indid in  
+                (SELECT indid FROM sysindexkeys  WHERE (id = a.id) AND (colid in  
+                (SELECT colid FROM syscolumns WHERE (id = a.id) AND (name = a.name)))))))  
+                AND (xtype = 'PK'))>0 then '√' else '' end) 主键,b.name 类型,a.length 占用字节数,  
+                COLUMNPROPERTY(a.id,a.name,'PRECISION') as 长度,  
+                isnull(COLUMNPROPERTY(a.id,a.name,'Scale'),0) as 小数位数,(case when a.isnullable=1 then '√'else '' end) 允许空,  
+                isnull(e.text,'') 默认值,isnull(g.[value], ' ') AS [说明]
+                FROM  syscolumns a 
+                left join systypes b on a.xtype=b.xusertype  
+                inner join sysobjects d on a.id=d.id and d.xtype='U' and d.name<>'dtproperties' 
+                left join syscomments e on a.cdefault=e.id  
+                left join sys.extended_properties g on a.id=g.major_id AND a.colid=g.minor_id
+                left join sys.extended_properties f on d.id=f.class and f.minor_id=0
+                --where b.name is not null
+                --WHERE d.name='TestTB' --如果只查询指定表,加上此条件
+                WHERE d.NAME = '" + tableName + @"' --如果只查询指定表,加上此条件
+                order by a.id,a.colorder
+                ";
+            conn.Open();
+            SqlCommand command = new SqlCommand(selectQuery,conn);
+            SqlDataAdapter ad = new SqlDataAdapter(command);
+            System.Data.DataSet ds = new DataSet(); 
+            ad.Fill(ds);
+            conn.Close();  
+            return ds.Tables[0];
+        }
+
+        public static string GetFieldType(string typeName)
+        {
+            string fieldType="";
+            switch(typeName){
+                case "bit":
+                    fieldType="bool";
+                    break;
+                case "int":
+                    fieldType="int";
+                    break;
+                case "smallint":
+                    fieldType="int";
+                    break;
+                case "tinyint":
+                    fieldType="int";
+                    break;
+                case "bigint":
+                    fieldType="Int64";
+                    break;
+                case "float":
+                    fieldType="float";
+                    break;
+                case "double":
+                    fieldType="float";
+                    break;
+                case "decimal":
+                    fieldType="decimal";
+                    break;
+                case "datetime":
+                    fieldType="DateTime";
+                    break;
+                case "date":
+                    fieldType="DateTime";
+                    break;
+                case "smalldatetime":
+                    fieldType="DateTime";
+                    break;
+                case "timestamp":
+                    fieldType="int";
+                    break;
+                
+                default:
+                    fieldType="string";
+                    break;
+            }
+            return fieldType;
+        }
+
+        public static string GetFieldType(string typeName,string isNull)
+        {
+            if (string.IsNullOrEmpty(isNull))
+            {
+                return GetFieldType(typeName);
+            }else{
+                string fieldType="";
+                switch(typeName){
+                    case "bit":
+                        fieldType="bool";
+                        break;
+                    case "int":
+                        fieldType="int?";
+                        break;
+                    case "smallint":
+                        fieldType="int?";
+                        break;
+                    case "tinyint":
+                        fieldType="int?";
+                        break;
+                    case "bigint":
+                        fieldType="int?";
+                        break;
+                    case "float":
+                        fieldType="float";
+                        break;
+                    case "double":
+                        fieldType="float";
+                        break;
+                    case "decimal":
+                        fieldType="decimal?";
+                        break;
+                    case "datetime":
+                        fieldType="DateTime?";
+                        break;
+                    case "date":
+                        fieldType="DateTime?";
+                        break;
+                    case "smalldatetime":
+                        fieldType="DateTime?";
+                        break;
+                    case "timestamp":
+                        fieldType="int?";
+                        break;
+                
+                    default:
+                        fieldType="string";
+                        break;
+                }
+                return fieldType;
+            }
+        }
+    }
+#>
